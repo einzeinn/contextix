@@ -1,0 +1,11 @@
+project:
+  name: Auto
+
+parser:
+  markdown: true
+  text: true
+  repo: true
+  pdf: false
+
+output:
+  directory: .context

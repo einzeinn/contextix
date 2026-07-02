@@ -1,0 +1,40 @@
+[project]
+name = "contextix"
+version = "0.1.0"
+description = "AI-first project memory engine."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "loguru>=0.7.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.scripts]
+contextix = "contextix.cli.main:main"
+
+[tool.setuptools]
+package-dir = { "contextix" = "src" }
+packages = [
+    "contextix",
+    "contextix.analyzer",
+    "contextix.builder",
+    "contextix.cli",
+    "contextix.config",
+    "contextix.core",
+    "contextix.exporter",
+    "contextix.models",
+    "contextix.optimizer",
+    "contextix.parser",
+    "contextix.pipeline",
+    "contextix.plugins",
+    "contextix.providers",
+    "contextix.providers.analysis",
+    "contextix.providers.export",
+    "contextix.providers.llm",
+    "contextix.providers.sponsor",
+    "contextix.storage",
+    "contextix.validator",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
