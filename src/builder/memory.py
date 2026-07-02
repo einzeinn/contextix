@@ -9,8 +9,34 @@ from contextix.models import ContextIR, Decision, DomainConcept, ProjectMemory
 
 
 # ---------------------------------------------------------------------------
+# Document priority: higher weight = more authoritative.
+# When conflicting information exists, the higher-weighted document wins.
+# ---------------------------------------------------------------------------
+DOCUMENT_WEIGHTS: dict[str, int] = {
+    "MANIFESTO.md": 100,
+    "docs/adr/": 95,          # prefix match for all ADRs
+    "README.md": 90,
+    "docs/architecture.md": 90,
+    "docs/rfc-": 90,           # prefix match for RFC docs
+    "docs/specification.md": 85,
+    "docs/PRD.md": 85,
+    "docs/roadmap.md": 70,
+    "docs/contributing.md": 50,
+    "research/": 20,
+    "": 30,                     # default for unknown documents
+}
+
+
+def _document_weight(source: str) -> int:
+    """Return the priority weight for a document source."""
+    for prefix, weight in sorted(DOCUMENT_WEIGHTS.items(), key=lambda x: -len(x[0])):
+        if prefix and source.lower().startswith(prefix.lower()):
+            return weight
+    return DOCUMENT_WEIGHTS.get("", 30)
+
+
+# ---------------------------------------------------------------------------
 # Token budget: max items per category before the exporter trims further.
-# These are generous — the real budget is enforced by the exporter.
 # ---------------------------------------------------------------------------
 CATEGORY_BUDGET: dict[str, int] = {
     "goals": 10,
@@ -90,34 +116,52 @@ class MemoryBuilder:
         return ratio >= 0.7
 
     def _merge_decisions(self, decisions: list[Decision]) -> list[Decision]:
-        """Merge decisions with identical `what` (case-insensitive)."""
+        """Merge decisions with identical `what` (case-insensitive).
+
+        When two decisions conflict, keep the one from the higher-priority document.
+        """
         seen: dict[str, Decision] = {}
         for d in decisions:
             key = d.what.strip().lower()
             if key not in seen:
                 seen[key] = d
             else:
-                # Keep the one with rationale if available
                 existing = seen[key]
-                if d.why and not existing.why:
+                existing_w = _document_weight(existing.source)
+                new_w = _document_weight(d.source)
+                if new_w > existing_w:
+                    seen[key] = d
+                elif d.why and not existing.why:
                     seen[key] = d
                 elif d.alternatives and not existing.alternatives:
                     seen[key] = d
-        return list(seen.values())
+        # Sort by document priority (highest first)
+        result = list(seen.values())
+        result.sort(key=lambda d: _document_weight(d.source), reverse=True)
+        return result
 
     def _merge_concepts(self, concepts: list[DomainConcept]) -> list[DomainConcept]:
-        """Merge concepts with identical term (case-insensitive)."""
+        """Merge concepts with identical term (case-insensitive).
+
+        When two definitions conflict, keep the one from the higher-priority document.
+        """
         seen: dict[str, DomainConcept] = {}
         for c in concepts:
             key = c.term.strip().lower()
             if key not in seen:
                 seen[key] = c
             else:
-                # Keep the longer definition
                 existing = seen[key]
-                if len(c.definition) > len(existing.definition):
+                existing_w = _document_weight(existing.source)
+                new_w = _document_weight(c.source)
+                if new_w > existing_w:
                     seen[key] = c
-        return list(seen.values())
+                elif len(c.definition) > len(existing.definition):
+                    seen[key] = c
+        # Sort by document priority (highest first)
+        result = list(seen.values())
+        result.sort(key=lambda c: _document_weight(c.source), reverse=True)
+        return result
 
     # ------------------------------------------------------------------
     # Token budget — cap items per category
