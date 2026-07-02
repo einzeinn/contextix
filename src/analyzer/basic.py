@@ -1,7 +1,7 @@
 """Deterministic heuristic analyzer for the Stage 1 baseline.
 
 Orchestrates specialized semantic detectors for goal, decision, constraint,
-architecture, tech-stack, and roadmap detection.
+architecture, tech-stack, roadmap, and domain-concept detection.
 """
 
 from __future__ import annotations
@@ -9,12 +9,19 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from contextix.models import AnalysisResult, ContextIR, ParsedDocument, ProjectIdentity
+from contextix.models import (
+    AnalysisResult,
+    ContextIR,
+    ParsedDocument,
+    ProjectIdentity,
+    ProjectState,
+)
 
 from .detectors import (
     ArchitectureDetector,
     ConstraintDetector,
     DecisionDetector,
+    DomainConceptDetector,
     GoalDetector,
     RoadmapDetector,
     TechStackDetector,
@@ -36,6 +43,7 @@ class BasicAnalyzer:
         self._architecture_detector = ArchitectureDetector()
         self._techstack_detector = TechStackDetector()
         self._roadmap_detector = RoadmapDetector()
+        self._domain_detector = DomainConceptDetector()
 
     def analyze(self, documents: list[ParsedDocument], root: Path) -> ContextIR:
         readme = self._find_document(documents, "README.md")
@@ -56,16 +64,48 @@ class BasicAnalyzer:
             non_goals=self._extract_bullets(documents, ["Non-Goals", "Out of Scope"]),
             features=self._extract_bullets(documents, ["Features", "MVP Scope", "Functional Requirements"]),
             decisions=self._decision_detector.detect(documents),
+            domain_concepts=self._domain_detector.detect(documents),
             roadmap=self._roadmap_detector.detect(documents),
             coding_standards=self._extract_bullets(documents, ["Coding Principles", "CLI Principles"]),
             documentation=sorted(doc.source for doc in documents if doc.file_type == "markdown"),
-            completed=["Stage 0 documentation baseline exists"],
-            current=["Stage 1 MVP foundation"],
-            next=["Improve parser coverage", "Add PDF parser", "Add richer validation"],
-            issues=["Heuristic analysis can miss implicit project knowledge"],
+            project_state=self._extract_project_state(documents),
         )
 
         return ContextIR(**result.__dict__)
+
+    def _extract_project_state(self, documents: list[ParsedDocument]) -> ProjectState:
+        version = self._detect_version(documents)
+        changes = self._recent_changes(documents)
+        return ProjectState(version=version, recent_changes=changes)
+
+    def _detect_version(self, documents: list[ParsedDocument]) -> str:
+        pyproject = self._find_document(documents, "pyproject.toml")
+        if pyproject:
+            match = re.search(r'version\s*=\s*"([^"]+)"', pyproject.content)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _recent_changes(self, documents: list[ParsedDocument]) -> list[str]:
+        changelog = self._find_document(documents, "CHANGELOG.md")
+        if not changelog:
+            return []
+        # Extract the first section after the top-level heading
+        lines = changelog.content.splitlines()
+        collecting = False
+        entries: list[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("## "):
+                if collecting:
+                    break
+                collecting = True
+                continue
+            if collecting and stripped.startswith("- "):
+                entries.append(stripped[2:].strip())
+            if len(entries) >= 5:
+                break
+        return entries
 
     def _find_document(self, documents: list[ParsedDocument], source: str) -> ParsedDocument | None:
         return next((doc for doc in documents if doc.source.lower() == source.lower()), None)

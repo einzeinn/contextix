@@ -3,6 +3,7 @@
 from .architecture import ArchitectureDetector
 from .constraint import ConstraintDetector
 from .decision import DecisionDetector
+from .domain import DomainConceptDetector
 from .goal import GoalDetector
 from .roadmap import RoadmapDetector
 from .techstack import TechStackDetector
@@ -12,6 +13,7 @@ __all__ = [
     "ArchitectureDetector",
     "ConstraintDetector",
     "DecisionDetector",
+    "DomainConceptDetector",
     "GoalDetector",
     "RoadmapDetector",
     "TechStackDetector",

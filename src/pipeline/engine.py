@@ -10,8 +10,10 @@ from contextix.analyzer import BasicAnalyzer
 from contextix.builder import MemoryBuilder
 from contextix.config import Settings
 from contextix.exporter import FileSystemExporter
+from contextix.linker import DocumentLinker
 from contextix.optimizer import BasicOptimizer
 from contextix.parser import RepositoryParser
+from contextix.validator import ContextValidator
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,8 @@ class PipelineEngine:
             enabled_file_types=self._enabled_file_types(),
         ).parse()
         context = BasicAnalyzer().analyze(documents, self.root)
+        context = DocumentLinker().link(documents, context)
+        context = ContextValidator().validate(documents, context)
         memory = MemoryBuilder().build(context)
         optimized = BasicOptimizer().optimize(memory)
 

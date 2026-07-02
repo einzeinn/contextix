@@ -65,7 +65,7 @@ class TestDecisionDetector:
             "## Decision\n\n- Use filesystem storage.\n",
         )
         decisions = DecisionDetector().detect([doc])
-        assert "Use filesystem storage." in decisions
+        assert any("Use filesystem storage" in d.what for d in decisions)
 
     def test_adr_paragraph_decision(self) -> None:
         doc = make_doc(
@@ -73,7 +73,7 @@ class TestDecisionDetector:
             "## Decision\n\nWe chose Redis for caching because it is fast and simple.\n",
         )
         decisions = DecisionDetector().detect([doc])
-        assert any("Redis" in d for d in decisions)
+        assert any("Redis" in d.what for d in decisions)
 
     def test_heading_decisions_section(self) -> None:
         doc = make_doc(
@@ -81,7 +81,7 @@ class TestDecisionDetector:
             "## Architecture Decisions\n\n- Use monolith first, split later\n",
         )
         decisions = DecisionDetector().detect([doc])
-        assert "Use monolith first, split later" in decisions
+        assert any("Use monolith first" in d.what for d in decisions)
 
     def test_inline_chose_pattern(self) -> None:
         doc = make_doc(
@@ -89,7 +89,7 @@ class TestDecisionDetector:
             "We chose Python over Rust because of faster prototyping speed.",
         )
         decisions = DecisionDetector().detect([doc])
-        assert any("Python" in d for d in decisions)
+        assert any("Python" in d.what for d in decisions)
 
     def test_inline_decided_to(self) -> None:
         doc = make_doc(
@@ -97,7 +97,7 @@ class TestDecisionDetector:
             "We decided to use YAML for configuration instead of JSON.",
         )
         decisions = DecisionDetector().detect([doc])
-        assert any("YAML" in d for d in decisions)
+        assert any("YAML" in d.what for d in decisions)
 
     def test_inline_trade_off(self) -> None:
         doc = make_doc(
@@ -105,7 +105,7 @@ class TestDecisionDetector:
             "The trade-off is simplicity vs flexibility — we chose simplicity.",
         )
         decisions = DecisionDetector().detect([doc])
-        assert any("simplicity" in d for d in decisions)
+        assert any("simplicity" in d.what for d in decisions)
 
     def test_deduplicates(self) -> None:
         doc = make_doc(
@@ -380,7 +380,7 @@ class TestBasicAnalyzerIntegration:
         assert "Memory export to YAML" in result.features
 
         assert len(result.decisions) >= 1
-        assert any("filesystem-first" in d for d in result.decisions)
+        assert any("filesystem-first" in d.what for d in result.decisions)
 
         assert len(result.constraints) >= 1
         assert any("10k documents" in c for c in result.constraints)
@@ -511,3 +511,260 @@ class TestExtractionRegression:
         assert "**Components:**" not in summary
         assert "**Relationships:**" not in summary
         assert len(summary) < 200
+
+
+class TestMemoryBuilder:
+    def test_merge_near_duplicate_strings(self) -> None:
+        from contextix.builder import MemoryBuilder
+        from contextix.models import ContextIR, ProjectIdentity
+
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            goals=[
+                "Preserve project understanding",
+                "Preserve project understanding across AI sessions",
+                "Completely different goal",
+            ],
+        )
+        builder = MemoryBuilder()
+        result = builder.build(context)
+
+        # "Preserve project understanding" is a subset of the longer one
+        assert "Preserve project understanding across AI sessions" in result.goals
+        assert "Completely different goal" in result.goals
+        # The shorter one should be merged away
+        assert result.goals.count("Preserve project understanding") == 0 or len(result.goals) == 2
+
+    def test_merge_keeps_distinct_items(self) -> None:
+        from contextix.builder import MemoryBuilder
+        from contextix.models import ContextIR, ProjectIdentity
+
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            goals=["Reduce token usage", "Preserve context", "Enable cross-LLM handoff"],
+        )
+        builder = MemoryBuilder()
+        result = builder.build(context)
+        assert len(result.goals) == 3
+
+    def test_merge_decisions_deduplicates_by_what(self) -> None:
+        from contextix.builder import MemoryBuilder
+        from contextix.models import ContextIR, Decision, ProjectIdentity
+
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            decisions=[
+                Decision(what="Use Redis", why="Fast", source="adr1.md"),
+                Decision(what="Use Redis", why="", source="adr2.md"),
+            ],
+        )
+        builder = MemoryBuilder()
+        result = builder.build(context)
+        assert len(result.decisions) == 1
+        assert result.decisions[0].why == "Fast"
+
+    def test_token_budget_caps_lists(self) -> None:
+        from contextix.builder.memory import MemoryBuilder, CATEGORY_BUDGET
+        from contextix.models import ContextIR, ProjectIdentity
+
+        goals = [f"Goal {i}" for i in range(20)]
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            goals=goals,
+        )
+        builder = MemoryBuilder()
+        result = builder.build(context)
+        assert len(result.goals) == CATEGORY_BUDGET["goals"]
+
+    def test_empty_lists_unchanged(self) -> None:
+        from contextix.builder import MemoryBuilder
+        from contextix.models import ContextIR, ProjectIdentity
+
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+        )
+        builder = MemoryBuilder()
+        result = builder.build(context)
+        assert result.goals == []
+        assert result.decisions == []
+        assert result.domain_concepts == []
+
+
+class TestDocumentLinker:
+    def test_markdown_links_detected(self) -> None:
+        from contextix.linker import DocumentLinker
+        from contextix.models import ContextIR, ParsedDocument, ProjectIdentity
+
+        docs = [
+            ParsedDocument(
+                source="README.md",
+                content="See [architecture](docs/architecture.md) for details.",
+                file_type="markdown",
+            ),
+            ParsedDocument(
+                source="docs/architecture.md",
+                content="# Architecture\n\nThe system is a pipeline.",
+                file_type="markdown",
+            ),
+        ]
+        context = ContextIR(project=ProjectIdentity(name="Test", description=""))
+        linker = DocumentLinker()
+        result = linker.link(docs, context)
+
+        assert len(result.references) >= 1
+        assert any(r.target == "docs/architecture.md" for r in result.references)
+
+    def test_self_references_skipped(self) -> None:
+        from contextix.linker import DocumentLinker
+        from contextix.models import ContextIR, ParsedDocument, ProjectIdentity
+
+        docs = [
+            ParsedDocument(
+                source="docs/adr/0001-test.md",
+                content="# ADR 0001: Test\n\nSee [ADR 0001](docs/adr/0001-test.md).",
+                file_type="markdown",
+            ),
+        ]
+        context = ContextIR(project=ProjectIdentity(name="Test", description=""))
+        linker = DocumentLinker()
+        result = linker.link(docs, context)
+
+        # No self-references
+        assert not any(
+            r.source == r.target for r in result.references
+        )
+
+    def test_adr_number_references(self) -> None:
+        from contextix.linker import DocumentLinker
+        from contextix.models import ContextIR, ParsedDocument, ProjectIdentity
+
+        docs = [
+            ParsedDocument(
+                source="README.md",
+                content="Depends on ADR 0001 being implemented.",
+                file_type="markdown",
+            ),
+            ParsedDocument(
+                source="docs/adr/0001-storage.md",
+                content="# ADR 0001: Storage",
+                file_type="markdown",
+            ),
+        ]
+        context = ContextIR(project=ProjectIdentity(name="Test", description=""))
+        linker = DocumentLinker()
+        result = linker.link(docs, context)
+
+        assert any("0001" in r.target for r in result.references)
+
+    def test_external_urls_skipped(self) -> None:
+        from contextix.linker import DocumentLinker
+        from contextix.models import ContextIR, ParsedDocument, ProjectIdentity
+
+        docs = [
+            ParsedDocument(
+                source="README.md",
+                content="See [GitHub](https://github.com/example).",
+                file_type="markdown",
+            ),
+        ]
+        context = ContextIR(project=ProjectIdentity(name="Test", description=""))
+        linker = DocumentLinker()
+        result = linker.link(docs, context)
+
+        assert not any("github.com" in r.target for r in result.references)
+
+
+class TestContextValidator:
+    def test_missing_rationale_flagged(self) -> None:
+        from contextix.validator import ContextValidator
+        from contextix.models import ContextIR, Decision, ProjectIdentity
+
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            decisions=[
+                Decision(what="Use Redis", why="", source="docs/adr/0001-test.md"),
+            ],
+        )
+        validator = ContextValidator()
+        result = validator.validate([], context)
+        assert len(result.validation_issues) >= 1
+        assert "rationale" in result.validation_issues[0].lower()
+
+    def test_broken_reference_flagged(self) -> None:
+        from contextix.validator import ContextValidator
+        from contextix.models import (
+            ContextIR,
+            DocumentReference,
+            ParsedDocument,
+            ProjectIdentity,
+        )
+
+        docs = [
+            ParsedDocument(
+                source="README.md",
+                content="# Test",
+                file_type="markdown",
+            ),
+        ]
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            references=[
+                DocumentReference(
+                    source="README.md",
+                    target="docs/missing.md",
+                    context="",
+                ),
+            ],
+        )
+        validator = ContextValidator()
+        result = validator.validate(docs, context)
+        assert len(result.validation_issues) >= 1
+        assert "broken" in result.validation_issues[0].lower()
+
+    def test_duplicate_goals_flagged(self) -> None:
+        from contextix.validator import ContextValidator
+        from contextix.models import ContextIR, ProjectIdentity
+
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            goals=[
+                "Preserve project understanding",
+                "preserve project understanding",
+            ],
+        )
+        validator = ContextValidator()
+        result = validator.validate([], context)
+        assert len(result.validation_issues) >= 1
+
+    def test_stale_roadmap_flagged(self) -> None:
+        from contextix.validator import ContextValidator
+        from contextix.models import ContextIR, ProjectIdentity
+
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            roadmap=["Ship v1.0 by Q1 2020"],
+        )
+        validator = ContextValidator()
+        result = validator.validate([], context)
+        assert len(result.validation_issues) >= 1
+        assert "stale" in result.validation_issues[0].lower()
+
+    def test_valid_context_no_issues(self) -> None:
+        from contextix.validator import ContextValidator
+        from contextix.models import ContextIR, Decision, ProjectIdentity
+
+        context = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            decisions=[
+                Decision(
+                    what="Use Redis",
+                    why="It is fast",
+                    source="docs/adr/0001-test.md",
+                ),
+            ],
+            goals=["Preserve context"],
+            roadmap=["Ship v2.0 by Q4 2027"],
+        )
+        validator = ContextValidator()
+        result = validator.validate([], context)
+        assert result.validation_issues == []

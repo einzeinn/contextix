@@ -1,5 +1,6 @@
 """CES validation."""
 
 from .ces import validate_context
+from .validator import ContextValidator
 
-__all__ = ["validate_context"]
+__all__ = ["ContextValidator", "validate_context"]

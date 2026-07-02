@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import asdict
 from pathlib import Path
 
-from contextix.models import Metadata, ProjectMemory, Snapshot
+from contextix.models import Decision, DomainConcept, Metadata, ProjectMemory, Snapshot
 from contextix.storage import FileSystemStorage
 
 
@@ -16,12 +16,7 @@ class FileSystemExporter:
 
     def export(self, memory: ProjectMemory, project_hash: str) -> list[Path]:
         context_data = self._context_data(memory)
-        snapshot = Snapshot(
-            completed=memory.completed,
-            current=memory.current,
-            next=memory.next,
-            issues=memory.issues,
-        )
+        snapshot = Snapshot(project_state=memory.project_state)
         metadata = Metadata(project_hash=project_hash)
         metadata.checksum = self._checksum(context_data)
 
@@ -29,6 +24,7 @@ class FileSystemExporter:
             self.storage.write_yaml("context.yaml", context_data),
             self.storage.write_json("snapshot.json", asdict(snapshot)),
             self.storage.write_json("metadata.json", asdict(metadata)),
+            self.storage.write_text("bootstrap.md", self._bootstrap(memory)),
             self.storage.write_text("summary.md", self._summary(memory)),
             self.storage.write_text("architecture.md", self._architecture(memory)),
             self.storage.write_text("handoff.md", self._handoff(memory)),
@@ -46,16 +42,65 @@ class FileSystemExporter:
             "constraints": memory.constraints,
             "non_goals": memory.non_goals,
             "features": memory.features,
-            "decisions": memory.decisions,
+            "decisions": [asdict(d) for d in memory.decisions],
+            "domain_concepts": [asdict(c) for c in memory.domain_concepts],
             "roadmap": memory.roadmap,
             "coding_standards": memory.coding_standards,
             "documentation": memory.documentation,
+            "project_state": asdict(memory.project_state),
+            "references": [asdict(r) for r in memory.references],
+            "validation_issues": memory.validation_issues,
         }
+
+    def _bootstrap(self, memory: ProjectMemory) -> str:
+        """The first 500 tokens an AI reads — purpose, key decisions, constraints.
+
+        This is the session bootstrap. It answers "what is this project?"
+        in the minimum tokens needed for the AI to start working.
+        """
+        lines: list[str] = [
+            f"# {memory.project.name}",
+            "",
+            memory.project.description,
+            "",
+            "## Purpose",
+            memory.vision[:300] if memory.vision else memory.project.description,
+            "",
+        ]
+
+        # Key decisions (top 3 with rationale)
+        key_decisions = [d for d in memory.decisions if d.why][:3]
+        if not key_decisions:
+            key_decisions = memory.decisions[:3]
+        if key_decisions:
+            lines.append("## Key Decisions")
+            for d in key_decisions:
+                lines.append(f"- {d.what[:120]}")
+                if d.why:
+                    lines.append(f"  _{d.why[:150]}_")
+            lines.append("")
+
+        # Top constraints (guardrails)
+        if memory.constraints:
+            lines.append("## Constraints")
+            for c in memory.constraints[:5]:
+                lines.append(f"- {c[:120]}")
+            lines.append("")
+
+        # Navigation
+        lines.append("## Where to Start")
+        lines.append(f"- Read `{memory.documentation[0]}`" if memory.documentation else "- Read the README")
+        if memory.project_state.version:
+            lines.append(f"- Version: {memory.project_state.version}")
+        lines.append("- Full context: `.context/context.yaml`")
+        lines.append("- Architecture: `.context/architecture.md`")
+
+        return "\n".join(lines)
 
     def _summary(self, memory: ProjectMemory) -> str:
         return "\n".join(
             [
-                f"# {memory.project.name}",
+                f"# {memory.project.name} — Overview",
                 "",
                 memory.project.description,
                 "",
@@ -68,11 +113,18 @@ class FileSystemExporter:
                 "## Architecture Patterns",
                 self._list(memory.architecture_patterns),
                 "",
+                "## Decisions",
+                self._decisions_list(memory.decisions),
+                "",
+                "## Domain Concepts",
+                self._concepts_list(memory.domain_concepts),
+                "",
                 "## Roadmap",
                 self._list(memory.roadmap),
                 "",
-                "## Current State",
-                self._list(memory.current),
+                "## Project State",
+                f"Version: {memory.project_state.version}",
+                self._list(memory.project_state.recent_changes),
                 "",
             ]
         )
@@ -90,7 +142,6 @@ class FileSystemExporter:
         if not text or text == "Architecture summary was not detected.":
             return text
 
-        # Take the first non-heading, non-label paragraph.
         for line in text.splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("#") or stripped.startswith("**"):
@@ -105,27 +156,33 @@ class FileSystemExporter:
             [
                 "# AI Handoff",
                 "",
-                f"You are working on {memory.project.name}.",
+                f"You are working on **{memory.project.name}**.",
+                f"Version: {memory.project_state.version}",
                 "",
-                "Use `.context/context.yaml` as the primary project memory.",
+                "## How to Use This Context",
+                "",
+                "1. Read `bootstrap.md` first — it's the 500-token summary.",
+                "2. Use `context.yaml` for structured project data.",
+                "3. Read `architecture.md` for system design.",
+                "4. Check `summary.md` for the full overview.",
                 "",
                 "## Project Purpose",
                 memory.project.description,
                 "",
-                "## Architecture Patterns",
-                self._list(memory.architecture_patterns),
+                "## Key Decisions",
+                self._decisions_list(memory.decisions[:5]),
                 "",
                 "## Constraints",
-                self._list(memory.constraints),
+                self._list(memory.constraints[:5]),
                 "",
                 "## Non-Goals",
                 self._list(memory.non_goals),
                 "",
                 "## Roadmap",
-                self._list(memory.roadmap),
+                self._list(memory.roadmap[:5]),
                 "",
-                "## Next Work",
-                self._list(memory.next),
+                "## Validation Issues",
+                self._list(memory.validation_issues) if memory.validation_issues else "_No issues detected._",
                 "",
             ]
         )
@@ -134,6 +191,26 @@ class FileSystemExporter:
         if not values:
             return "- Not detected yet."
         return "\n".join(f"- {value}" for value in values)
+
+    def _decisions_list(self, decisions: list[Decision]) -> str:
+        if not decisions:
+            return "- Not detected yet."
+        lines: list[str] = []
+        for d in decisions:
+            lines.append(f"- {d.what}")
+            if d.why:
+                lines.append(f"  Why: {d.why}")
+            if d.source:
+                lines.append(f"  Source: {d.source}")
+        return "\n".join(lines)
+
+    def _concepts_list(self, concepts: list[DomainConcept]) -> str:
+        if not concepts:
+            return "- Not detected yet."
+        lines: list[str] = []
+        for c in concepts:
+            lines.append(f"- **{c.term}**: {c.definition}")
+        return "\n".join(lines)
 
     def _checksum(self, data: dict) -> str:
         return hashlib.sha256(repr(data).encode("utf-8")).hexdigest()

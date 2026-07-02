@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import re
 
-from contextix.models import ParsedDocument
+from contextix.models import Decision, ParsedDocument
 
 from .shared import (
-    deduplicate_preserve_order,
     extract_bullets,
     extract_section,
     extract_sentences,
@@ -18,7 +17,7 @@ class DecisionDetector:
     """Detect decisions from ADR documents and inline decision statements.
 
     Strategies:
-    1. ADR documents: extract "Decision" section from docs/adr/*.md
+    1. ADR documents: pair "Decision" + "Rationale" sections
     2. Inline patterns: "We chose X because Y", "Decided to X", "Opted for X"
     3. Trade-off statements: "Trade-off", "X vs Y", "X over Y"
     4. Decision headings: "Architecture Decisions", "Decisions", "Key Decisions"
@@ -37,7 +36,6 @@ class DecisionDetector:
         re.compile(r"(?:we|I|team)\s+decided\s+to\s+", re.IGNORECASE),
         re.compile(r"(?:we|I|team)\s+opted\s+(?:for|to)\s+", re.IGNORECASE),
         re.compile(r"decision\s*(?::|was|is)\s+to\s+", re.IGNORECASE),
-        re.compile(r"(?:rationale|reasoning)\s*(?::|was|is)\s+", re.IGNORECASE),
         re.compile(r"(?:instead|rather)\s+than\s+", re.IGNORECASE),
         re.compile(r"in\s+favor\s+of\s+", re.IGNORECASE),
         re.compile(r"trade-?off\s*(?::|between|is)\s+", re.IGNORECASE),
@@ -45,8 +43,17 @@ class DecisionDetector:
         re.compile(r"(?:prefer|preferred|chose)\s+\S+\s+over\s+", re.IGNORECASE),
     ]
 
-    def detect(self, documents: list[ParsedDocument]) -> list[str]:
-        decisions: list[str] = []
+    RATIONALE_HEADINGS = [
+        r"^rationale$",
+        r"^context$",
+        r"^reasoning$",
+        r"^motivation$",
+        r"^why$",
+        r"^background$",
+    ]
+
+    def detect(self, documents: list[ParsedDocument]) -> list[Decision]:
+        decisions: list[Decision] = []
 
         for doc in documents:
             if doc.source.lower().startswith("docs/adr/"):
@@ -57,39 +64,69 @@ class DecisionDetector:
                 decisions.extend(self._heading_decisions(doc))
                 decisions.extend(self._inline_decisions(doc))
 
-        return deduplicate_preserve_order(decisions)
+        return self._deduplicate_decisions(decisions)
 
-    def _adr_decision(self, doc: ParsedDocument) -> list[str]:
-        section = extract_section(doc.content, "Decision")
-        bullets = extract_bullets(section)
+    def _adr_decision(self, doc: ParsedDocument) -> list[Decision]:
+        what_section = extract_section(doc.content, "Decision")
+        if not what_section:
+            return []
+
+        # Try to find the rationale section
+        why = ""
+        for heading in self.RATIONALE_HEADINGS:
+            rationale = extract_section(doc.content, heading)
+            if rationale:
+                why = self._first_paragraph(rationale)
+                break
+
+        # Extract bullet items or first paragraph as individual decisions
+        bullets = extract_bullets(what_section)
         if bullets:
-            return bullets
+            return [
+                Decision(what=bullet, why=why, source=doc.source)
+                for bullet in bullets
+            ]
 
-        paragraph = self._first_paragraph(section)
-        return [paragraph] if paragraph else []
+        paragraph = self._first_paragraph(what_section)
+        if paragraph:
+            return [Decision(what=paragraph, why=why, source=doc.source)]
 
-    def _heading_decisions(self, doc: ParsedDocument) -> list[str]:
-        results: list[str] = []
+        return []
+
+    def _heading_decisions(self, doc: ParsedDocument) -> list[Decision]:
+        results: list[Decision] = []
         for pattern in self.DECISION_HEADINGS:
             section = extract_section(doc.content, pattern)
-            if section:
-                bullets = extract_bullets(section)
-                if bullets:
-                    results.extend(bullets)
-                else:
-                    for sentence in extract_sentences(section):
-                        if len(sentence) > 15:
-                            results.append(sentence)
+            if not section:
+                continue
+            bullets = extract_bullets(section)
+            if bullets:
+                for bullet in bullets:
+                    results.append(Decision(what=bullet, source=doc.source))
+            else:
+                for sentence in extract_sentences(section):
+                    if len(sentence) > 15:
+                        results.append(Decision(what=sentence, source=doc.source))
         return results
 
-    def _inline_decisions(self, doc: ParsedDocument) -> list[str]:
-        results: list[str] = []
+    def _inline_decisions(self, doc: ParsedDocument) -> list[Decision]:
+        results: list[Decision] = []
         for sentence in extract_sentences(doc.content):
             for pat in self.INLINE_PATTERNS:
                 if pat.search(sentence):
-                    results.append(sentence)
+                    results.append(Decision(what=sentence, source=doc.source))
                     break
         return results
+
+    def _deduplicate_decisions(self, decisions: list[Decision]) -> list[Decision]:
+        seen: set[str] = set()
+        result: list[Decision] = []
+        for d in decisions:
+            key = re.sub(r"\s+", " ", d.what).strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                result.append(d)
+        return result
 
     def _first_paragraph(self, text: str) -> str:
         lines = [line.strip() for line in text.splitlines()]

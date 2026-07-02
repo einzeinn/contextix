@@ -29,7 +29,9 @@ def test_generate_memory_creates_context_files(tmp_path: Path) -> None:
     assert context["project"]["name"] == "Demo"
     assert context["goals"] == ["Preserve context"]
     assert context["features"] == ["Memory export"]
-    assert context["decisions"] == ["Use filesystem storage."]
+    # Decisions are now structured: list of {what, why, alternatives, source}
+    assert len(context["decisions"]) == 1
+    assert context["decisions"][0]["what"] == "Use filesystem storage."
     assert "notes.txt" not in context["documentation"]
 
 
