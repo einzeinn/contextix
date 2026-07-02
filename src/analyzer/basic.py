@@ -1,4 +1,8 @@
-"""Deterministic heuristic analyzer for the Stage 1 baseline."""
+"""Deterministic heuristic analyzer for the Stage 1 baseline.
+
+Orchestrates specialized semantic detectors for goal, decision, constraint,
+architecture, tech-stack, and roadmap detection.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +11,31 @@ from pathlib import Path
 
 from contextix.models import AnalysisResult, ContextIR, ParsedDocument, ProjectIdentity
 
+from .detectors import (
+    ArchitectureDetector,
+    ConstraintDetector,
+    DecisionDetector,
+    GoalDetector,
+    RoadmapDetector,
+    TechStackDetector,
+    extract_section,
+    extract_bullets,
+)
+
 
 class BasicAnalyzer:
-    """Extract initial project understanding without using an LLM."""
+    """Extract initial project understanding without using an LLM.
+
+    Delegates to specialized detectors for each semantic category.
+    """
+
+    def __init__(self) -> None:
+        self._goal_detector = GoalDetector()
+        self._decision_detector = DecisionDetector()
+        self._constraint_detector = ConstraintDetector()
+        self._architecture_detector = ArchitectureDetector()
+        self._techstack_detector = TechStackDetector()
+        self._roadmap_detector = RoadmapDetector()
 
     def analyze(self, documents: list[ParsedDocument], root: Path) -> ContextIR:
         readme = self._find_document(documents, "README.md")
@@ -18,18 +44,19 @@ class BasicAnalyzer:
 
         result = AnalysisResult(
             project=ProjectIdentity(name=project_name, description=description),
-            vision=self._extract_section(readme, "Long-Term Vision") or self._extract_manifest_vision(documents),
-            goals=self._extract_bullets(documents, ["Product Goals", "Goals"]),
-            tech_stack=self._detect_tech_stack(documents),
-            architecture=self._extract_section_by_sources(
-                documents,
-                ["docs/architecture.md", "architecture.md"],
-                ["High-Level Architecture", "System Components", "Execution Flow"],
+            vision=(
+                self._extract_section(readme, "Long-Term Vision")
+                or self._extract_manifest_vision(documents)
             ),
-            constraints=self._extract_bullets(documents, ["Non-Functional Requirements"]),
+            goals=self._goal_detector.detect(documents),
+            tech_stack=self._techstack_detector.detect(documents),
+            architecture=self._architecture_detector.detect(documents),
+            architecture_patterns=self._architecture_detector.detect_patterns(documents),
+            constraints=self._constraint_detector.detect(documents),
             non_goals=self._extract_bullets(documents, ["Non-Goals", "Out of Scope"]),
             features=self._extract_bullets(documents, ["Features", "MVP Scope", "Functional Requirements"]),
-            decisions=self._extract_decisions(documents),
+            decisions=self._decision_detector.detect(documents),
+            roadmap=self._roadmap_detector.detect(documents),
             coding_standards=self._extract_bullets(documents, ["Coding Principles", "CLI Principles"]),
             documentation=sorted(doc.source for doc in documents if doc.file_type == "markdown"),
             completed=["Stage 0 documentation baseline exists"],
@@ -65,153 +92,17 @@ class BasicAnalyzer:
         manifest = self._find_document(documents, "MANIFESTO.md")
         return self._extract_section(manifest, "Our Vision")
 
-    def _extract_section_by_sources(
-        self,
-        documents: list[ParsedDocument],
-        sources: list[str],
-        headings: list[str],
-    ) -> str:
-        for source in sources:
-            document = self._find_document(documents, source)
-            if not document:
-                continue
-            parts = [self._extract_section(document, heading) for heading in headings]
-            text = "\n\n".join(part for part in parts if part)
-            if text:
-                return text
-        return "Architecture summary was not detected."
-
     def _extract_section(self, document: ParsedDocument | None, heading: str) -> str:
         if not document:
             return ""
-
-        lines = document.content.splitlines()
-        collecting = False
-        collected: list[str] = []
-        heading_pattern = re.compile(rf"^#+\s+{re.escape(heading)}\s*$", re.IGNORECASE)
-
-        for line in lines:
-            if heading_pattern.match(line.strip()):
-                collecting = True
-                continue
-            if collecting and line.startswith("#"):
-                break
-            if collecting:
-                collected.append(line.rstrip())
-
-        # Trailing blank lines and markdown horizontal rules (---, ***, ___)
-        # are formatting, not content — strip them from the end of the block.
-        while collected and (
-            not collected[-1].strip()
-            or re.match(r"^\s*([-*_])\1{2,}\s*$", collected[-1])
-        ):
-            collected.pop()
-
-        return "\n".join(collected).strip()
+        return extract_section(document.content, heading)
 
     def _extract_bullets(self, documents: list[ParsedDocument], headings: list[str]) -> list[str]:
+        from .detectors.shared import deduplicate_preserve_order
+
         values: list[str] = []
         for doc in documents:
             for heading in headings:
                 section = self._extract_section(doc, heading)
-                values.extend(self._bullet_lines(section))
-        return self._dedupe(values)
-
-    def _extract_decisions(self, documents: list[ParsedDocument]) -> list[str]:
-        decisions: list[str] = []
-        for doc in documents:
-            if doc.source.lower().startswith("docs/adr/"):
-                decisions.extend(self._extract_adr_decisions(doc))
-                continue
-
-            for heading in ["Architecture Decisions", "Decisions"]:
-                decisions.extend(self._bullet_lines(self._extract_section(doc, heading)))
-        return self._dedupe(decisions)
-
-    def _extract_adr_decisions(self, document: ParsedDocument) -> list[str]:
-        decision_section = self._extract_section(document, "Decision")
-        bullets = self._bullet_lines(decision_section)
-        if bullets:
-            return bullets
-
-        paragraph = self._first_paragraph(decision_section)
-        return [paragraph] if paragraph else []
-
-    def _first_paragraph(self, text: str) -> str:
-        lines = [line.strip() for line in text.splitlines()]
-        paragraph: list[str] = []
-
-        for line in lines:
-            if not line:
-                if paragraph:
-                    break
-                continue
-            paragraph.append(line)
-
-        return " ".join(paragraph)
-
-    def _bullet_lines(self, text: str) -> list[str]:
-        items = []
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("- "):
-                items.append(stripped[2:].strip())
-            elif re.match(r"^\d+\.\s+", stripped):
-                items.append(re.sub(r"^\d+\.\s+", "", stripped).strip())
-        return items
-
-    def _detect_tech_stack(self, documents: list[ParsedDocument]) -> list[str]:
-        stack = set()
-        types = {doc.file_type for doc in documents}
-
-        if "python" in types:
-            stack.add("Python")
-        if "javascript" in types:
-            stack.add("JavaScript")
-        if "typescript" in types:
-            stack.add("TypeScript")
-
-        stack.update(self._dependency_names(documents))
-
-        return sorted(stack)
-
-    def _dependency_names(self, documents: list[ParsedDocument]) -> set[str]:
-        """Pull actual library/framework names out of dependency manifests
-        instead of guessing tech stack purely from file extensions."""
-        names: set[str] = set()
-
-        pyproject = self._find_document(documents, "pyproject.toml")
-        if pyproject:
-            for line in pyproject.content.splitlines():
-                match = re.match(r'^\s*"([A-Za-z0-9_.-]+)\s*[><=~!]', line.strip())
-                if match:
-                    names.add(match.group(1))
-
-        requirements = self._find_document(documents, "requirements.txt")
-        if requirements:
-            for line in requirements.content.splitlines():
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                match = re.match(r"^([A-Za-z0-9_.-]+)", stripped)
-                if match:
-                    names.add(match.group(1))
-
-        package_json = self._find_document(documents, "package.json")
-        if package_json:
-            for match in re.finditer(r'"([A-Za-z0-9@/_.-]+)"\s*:\s*"[^"]*"', package_json.content):
-                name = match.group(1)
-                if name not in {"name", "version", "scripts", "dependencies", "devDependencies", "main", "license", "description", "type"}:
-                    names.add(name)
-
-        return names
-
-    def _dedupe(self, values: list[str]) -> list[str]:
-        seen = set()
-        result = []
-        for value in values:
-            normalized = re.sub(r"\s+", " ", value).strip()
-            if normalized and normalized.lower() not in seen:
-                seen.add(normalized.lower())
-                result.append(normalized)
-        return result
+                values.extend(extract_bullets(section))
+        return deduplicate_preserve_order(values)

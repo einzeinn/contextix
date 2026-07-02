@@ -41,11 +41,13 @@ class FileSystemExporter:
             "vision": memory.vision,
             "goals": memory.goals,
             "tech_stack": memory.tech_stack,
-            "architecture": memory.architecture,
+            "architecture": self._architecture_summary(memory),
+            "architecture_patterns": memory.architecture_patterns,
             "constraints": memory.constraints,
             "non_goals": memory.non_goals,
             "features": memory.features,
             "decisions": memory.decisions,
+            "roadmap": memory.roadmap,
             "coding_standards": memory.coding_standards,
             "documentation": memory.documentation,
         }
@@ -63,6 +65,12 @@ class FileSystemExporter:
                 "## Tech Stack",
                 self._list(memory.tech_stack),
                 "",
+                "## Architecture Patterns",
+                self._list(memory.architecture_patterns),
+                "",
+                "## Roadmap",
+                self._list(memory.roadmap),
+                "",
                 "## Current State",
                 self._list(memory.current),
                 "",
@@ -71,6 +79,26 @@ class FileSystemExporter:
 
     def _architecture(self, memory: ProjectMemory) -> str:
         return f"# Architecture\n\n{memory.architecture}\n"
+
+    def _architecture_summary(self, memory: ProjectMemory) -> str:
+        """Return a concise architecture summary for context.yaml.
+
+        The full architecture text lives in architecture.md — context.yaml
+        gets only the first meaningful paragraph to avoid token bloat.
+        """
+        text = memory.architecture.strip()
+        if not text or text == "Architecture summary was not detected.":
+            return text
+
+        # Take the first non-heading, non-label paragraph.
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or stripped.startswith("**"):
+                continue
+            if len(stripped) > 40:
+                return stripped
+
+        return text.split("\n")[0] if text else ""
 
     def _handoff(self, memory: ProjectMemory) -> str:
         return "\n".join(
@@ -84,11 +112,17 @@ class FileSystemExporter:
                 "## Project Purpose",
                 memory.project.description,
                 "",
+                "## Architecture Patterns",
+                self._list(memory.architecture_patterns),
+                "",
                 "## Constraints",
                 self._list(memory.constraints),
                 "",
                 "## Non-Goals",
                 self._list(memory.non_goals),
+                "",
+                "## Roadmap",
+                self._list(memory.roadmap),
                 "",
                 "## Next Work",
                 self._list(memory.next),

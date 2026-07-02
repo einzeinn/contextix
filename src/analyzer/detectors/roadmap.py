@@ -1,0 +1,123 @@
+"""Roadmap detection — finds future plans, milestones, and upcoming work."""
+
+from __future__ import annotations
+
+import re
+
+from contextix.models import ParsedDocument
+
+from .shared import (
+    deduplicate_preserve_order,
+    extract_bullets,
+    extract_section,
+    extract_sentences,
+)
+
+
+class RoadmapDetector:
+    """Detect roadmap, milestones, and planned future work.
+
+    Strategies:
+    1. Heading-based: "Roadmap", "Milestones", "Upcoming", "Future Work", "Planned"
+    2. Version patterns: "v1.0", "v2.0", "Phase 1", "Phase 2"
+    3. Timeline patterns: "Q1", "Q2", "by end of", "next quarter"
+    4. Progress sections: "Next Steps", "Future Enhancements"
+    """
+
+    ROADMAP_HEADINGS = [
+        r"^roadmap$",
+        r"^milestones?$",
+        r"^upcoming$",
+        r"^future\s+work$",
+        r"^future\s+enhancements?$",
+        r"^planned$",
+        r"^plans?$",
+        r"^what.s?\s+next$",
+        r"^next\s+steps?$",
+        r"^looking\s+forward$",
+        r"^looking\s+ahead$",
+        r"^on\s+the\s+horizon$",
+        r"^backlog$",
+        r"^wishlist$",
+        r"^ideas?$",
+    ]
+
+    VERSION_PATTERNS = [
+        re.compile(r"\bv(\d+\.\d+(?:\.\d+)?)\b"),
+        re.compile(r"\bversion\s+(\d+\.\d+(?:\.\d+)?)\b", re.IGNORECASE),
+        re.compile(r"\bphase\s+(\d+|I{1,3}|one|two|three)\b", re.IGNORECASE),
+        re.compile(r"\bstage\s+(\d+|I{1,3}|one|two|three)\b", re.IGNORECASE),
+        re.compile(r"\bmilestone\s+(\d+|I{1,3}|one|two|three)\b", re.IGNORECASE),
+    ]
+
+    TIMELINE_PATTERNS = [
+        re.compile(r"\bQ[1-4]\s*(?:'?\d{2})?\b"),
+        re.compile(r"\b(?:by|before|after|in)\s+(?:end\s+of\s+)?(?:Q[1-4]|January|February|March|April|May|June|July|August|September|October|November|December|next\s+(?:month|quarter|year|week))(?:\b|[.,;:!?]|$)", re.IGNORECASE),
+        re.compile(r"\b(?:next|this|coming)\s+(?:quarter|sprint|release|version)(?:\b|[.,;:!?]|$)", re.IGNORECASE),
+        re.compile(r"\b(?:short[- ]term|medium[- ]term|long[- ]term)\b", re.IGNORECASE),
+    ]
+
+    def detect(self, documents: list[ParsedDocument]) -> list[str]:
+        roadmap: list[str] = []
+
+        for doc in documents:
+            if doc.file_type != "markdown":
+                continue
+            roadmap.extend(self._heading_roadmap(doc))
+            roadmap.extend(self._version_items(doc))
+
+        if not roadmap:
+            roadmap.extend(self._progression_lines(documents))
+
+        return deduplicate_preserve_order(roadmap)
+
+    def _heading_roadmap(self, doc: ParsedDocument) -> list[str]:
+        results: list[str] = []
+        for pattern in self.ROADMAP_HEADINGS:
+            section = extract_section(doc.content, pattern)
+            if section:
+                bullets = extract_bullets(section)
+                if bullets:
+                    results.extend(bullets)
+                else:
+                    for sentence in extract_sentences(section):
+                        if len(sentence) > 15:
+                            results.append(sentence)
+        return results
+
+    def _version_items(self, doc: ParsedDocument) -> list[str]:
+        results: list[str] = []
+        for line in doc.content.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            for pat in self.VERSION_PATTERNS:
+                if pat.search(stripped):
+                    timeline_hit = any(
+                        tp.search(stripped) for tp in self.TIMELINE_PATTERNS
+                    )
+                    if timeline_hit:
+                        if stripped.startswith("- ") or stripped.startswith("* "):
+                            results.append(stripped[2:].strip())
+                        elif re.match(r"^\d+\.\s+", stripped):
+                            results.append(re.sub(r"^\d+\.\s+", "", stripped).strip())
+                        else:
+                            results.append(stripped)
+                    break
+        return results
+
+    def _progression_lines(self, documents: list[ParsedDocument]) -> list[str]:
+        results: list[str] = []
+        for doc in documents:
+            for line in doc.content.splitlines():
+                stripped = line.strip()
+                for pat in self.TIMELINE_PATTERNS:
+                    if pat.search(stripped) and len(stripped) > 20:
+                        if stripped.startswith("- ") or stripped.startswith("* "):
+                            results.append(stripped[2:].strip())
+                        elif re.match(r"^\d+\.\s+", stripped):
+                            results.append(re.sub(r"^\d+\.\s+", "", stripped).strip())
+                        else:
+                            results.append(stripped)
+                        break
+        return deduplicate_preserve_order(results)[:10]
