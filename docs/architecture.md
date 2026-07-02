@@ -32,15 +32,10 @@ Repository
        │  ContextIR (with validation_issues)
        ▼
 ┌──────────┐
-│  Builder │  Merge near-duplicates, apply token budget per category
+│  Builder │  Merge, deduplicate, prioritize, summarize, apply token budget
 └────┬─────┘
      │  ProjectMemory
      ▼
-┌─────────────┐
-│  Optimizer  │  Deduplicate lists, preserve order
-└──────┬──────┘
-       │  ProjectMemory (optimized)
-       ▼
 ┌──────────────┐
 │  Exporter    │  Write .context/ files
 └──────┬───────┘
