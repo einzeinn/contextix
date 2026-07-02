@@ -43,9 +43,12 @@ class TestGoalDetector:
         assert any("make project knowledge portable" in g for g in goals)
 
     def test_intent_line_should(self) -> None:
+        # Intent lines are low confidence (0.4) and filtered out.
+        # Only heading-based (0.9) and sentence patterns (0.6) are kept.
         doc = make_doc("README.md", "The project should preserve understanding beyond individual developers.")
         goals = GoalDetector().detect([doc])
-        assert any("preserve understanding" in g for g in goals)
+        # Intent lines are dropped — they're not reliable enough
+        assert len(goals) == 0
 
     def test_deduplicates_similar_goals(self) -> None:
         doc = make_doc("README.md", "## Goals\n\n- Preserve context\n\n- Preserve context\n")

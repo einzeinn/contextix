@@ -71,6 +71,19 @@ class RoadmapDetector:
 
         return deduplicate_preserve_order(roadmap)
 
+    def _is_poetic(self, text: str) -> bool:
+        """Filter out poetic/philosophical sentences that aren't real milestones."""
+        stripped = text.strip().lower()
+        poetic_starts = [
+            "perhaps one day", "perhaps every", "if that future",
+            "maybe someday", "one can dream", "in a perfect world",
+            "looking forward", "we believe", "we hope",
+        ]
+        for start in poetic_starts:
+            if stripped.startswith(start):
+                return True
+        return False
+
     def _heading_roadmap(self, doc: ParsedDocument) -> list[str]:
         results: list[str] = []
         for pattern in self.ROADMAP_HEADINGS:
@@ -78,10 +91,10 @@ class RoadmapDetector:
             if section:
                 bullets = extract_bullets(section)
                 if bullets:
-                    results.extend(bullets)
+                    results.extend(b for b in bullets if not self._is_poetic(b))
                 else:
                     for sentence in extract_sentences(section):
-                        if len(sentence) > 15:
+                        if len(sentence) > 15 and not self._is_poetic(sentence):
                             results.append(sentence)
         return results
 
@@ -113,6 +126,8 @@ class RoadmapDetector:
                 stripped = line.strip()
                 for pat in self.TIMELINE_PATTERNS:
                     if pat.search(stripped) and len(stripped) > 20:
+                        if self._is_poetic(stripped):
+                            break
                         if stripped.startswith("- ") or stripped.startswith("* "):
                             results.append(stripped[2:].strip())
                         elif re.match(r"^\d+\.\s+", stripped):

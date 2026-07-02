@@ -36,25 +36,15 @@ class ArchitectureDetector:
     ]
 
     KNOWN_PATTERNS = [
-        ("microservices", re.compile(r"\bmicroservices?\b", re.IGNORECASE)),
-        ("monolith", re.compile(r"\bmonolith(?:ic)?\b", re.IGNORECASE)),
-        ("event-driven", re.compile(r"\bevent[- ]driven\b", re.IGNORECASE)),
-        ("CQRS", re.compile(r"\bCQRS\b")),
-        ("hexagonal", re.compile(r"\bhexagonal\s+architecture\b", re.IGNORECASE)),
-        ("layered", re.compile(r"\blayered\s+architecture\b", re.IGNORECASE)),
-        ("pipeline", re.compile(r"\bpipeline\s+(?:architecture|pattern|design)\b", re.IGNORECASE)),
-        ("plugin", re.compile(r"\bplugin\s+(?:architecture|system|pattern)\b", re.IGNORECASE)),
-        ("modular", re.compile(r"\bmodular\s+(?:architecture|design|system)\b", re.IGNORECASE)),
-        ("client-server", re.compile(r"\bclient[- ]server\b", re.IGNORECASE)),
-        ("REST API", re.compile(r"\bREST(?:ful)?\s+API\b", re.IGNORECASE)),
-        ("GraphQL", re.compile(r"\bGraphQL\b")),
-        ("message queue", re.compile(r"\bmessage\s+queue\b", re.IGNORECASE)),
-        ("pub-sub", re.compile(r"\bpub[- ]sub\b", re.IGNORECASE)),
-        ("ETL pipeline", re.compile(r"\bETL\s+pipeline\b", re.IGNORECASE)),
-        ("serverless", re.compile(r"\bserverless\b", re.IGNORECASE)),
-        ("MVC", re.compile(r"\bMVC\b")),
-        ("actor model", re.compile(r"\bactor\s+model\b", re.IGNORECASE)),
-        ("domain-driven", re.compile(r"\bdomain[- ]driven\b", re.IGNORECASE)),
+        ("microservices", re.compile(r"\b(?:uses?|follows?|built\s+with|adopted|is\s+(?:a|an))\s+.*?\bmicroservices?\b", re.IGNORECASE)),
+        ("monolith", re.compile(r"\b(?:uses?|follows?|built\s+with|started\s+as|is\s+(?:a|an))\s+.*?\bmonolith(?:ic)?\b", re.IGNORECASE)),
+        ("event-driven", re.compile(r"\b(?:uses?|follows?|built\s+with|is)\s+.*?\bevent[- ]driven\b", re.IGNORECASE)),
+        ("pipeline", re.compile(r"\b(?:uses?|follows?|built\s+with|is\s+(?:a|an))\s+.*?\bpipeline\s+(?:architecture|pattern|design)\b", re.IGNORECASE)),
+        ("plugin", re.compile(r"\b(?:uses?|follows?|built\s+with|is\s+(?:a|an))\s+.*?\bplugin\s+(?:architecture|system|pattern)\b", re.IGNORECASE)),
+        ("modular", re.compile(r"\b(?:uses?|follows?|is)\s+.*?\bmodular\s+(?:architecture|design|system)\b", re.IGNORECASE)),
+        ("layered", re.compile(r"\b(?:uses?|follows?|is)\s+.*?\blayered\s+architecture\b", re.IGNORECASE)),
+        ("hexagonal", re.compile(r"\b(?:uses?|follows?|is)\s+.*?\bhexagonal\s+architecture\b", re.IGNORECASE)),
+        ("CQRS", re.compile(r"\b(?:uses?|follows?|implements?|is)\s+.*?\bCQRS\b", re.IGNORECASE)),
     ]
 
     COMPONENT_INDICATORS = [
@@ -82,6 +72,7 @@ class ArchitectureDetector:
                 section = extract_section(doc.content, heading)
                 if section:
                     clean = self._strip_code_blocks(section)
+                    clean = self._strip_table_rows(clean)
                     if len(clean) > 30:
                         parts.append(clean)
                         break
@@ -138,3 +129,12 @@ class ArchitectureDetector:
         """Remove fenced code blocks (```...```) so regex/source artifacts
         inside code samples are not mistaken for architecture descriptions."""
         return re.sub(r"```[\s\S]*?```", "", content)
+
+    @staticmethod
+    def _strip_table_rows(content: str) -> str:
+        """Remove markdown table rows so tables are not treated as prose."""
+        lines = content.splitlines()
+        kept = [line for line in lines if not (
+            line.strip().startswith("|") and line.strip().endswith("|")
+        )]
+        return "\n".join(kept)
