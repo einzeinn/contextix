@@ -26,7 +26,8 @@ class BasicAnalyzer:
                 ["docs/architecture.md", "architecture.md"],
                 ["High-Level Architecture", "System Components", "Execution Flow"],
             ),
-            constraints=self._extract_bullets(documents, ["Non-Functional Requirements", "Non-Goals", "Out of Scope"]),
+            constraints=self._extract_bullets(documents, ["Non-Functional Requirements"]),
+            non_goals=self._extract_bullets(documents, ["Non-Goals", "Out of Scope"]),
             features=self._extract_bullets(documents, ["Features", "MVP Scope", "Functional Requirements"]),
             decisions=self._extract_decisions(documents),
             coding_standards=self._extract_bullets(documents, ["Coding Principles", "CLI Principles"]),
@@ -98,6 +99,14 @@ class BasicAnalyzer:
             if collecting:
                 collected.append(line.rstrip())
 
+        # Trailing blank lines and markdown horizontal rules (---, ***, ___)
+        # are formatting, not content — strip them from the end of the block.
+        while collected and (
+            not collected[-1].strip()
+            or re.match(r"^\s*([-*_])\1{2,}\s*$", collected[-1])
+        ):
+            collected.pop()
+
         return "\n".join(collected).strip()
 
     def _extract_bullets(self, documents: list[ParsedDocument], headings: list[str]) -> list[str]:
@@ -153,21 +162,49 @@ class BasicAnalyzer:
 
     def _detect_tech_stack(self, documents: list[ParsedDocument]) -> list[str]:
         stack = set()
-        sources = {doc.source.lower() for doc in documents}
         types = {doc.file_type for doc in documents}
 
-        if "python" in types or "pyproject.toml" in sources:
+        if "python" in types:
             stack.add("Python")
-        if "pyproject.toml" in sources:
-            stack.add("Python packaging")
-        if any(source.endswith((".yaml", ".yml")) for source in sources):
-            stack.add("YAML")
-        if "markdown" in types:
-            stack.add("Markdown")
-        if "json" in types:
-            stack.add("JSON")
+        if "javascript" in types:
+            stack.add("JavaScript")
+        if "typescript" in types:
+            stack.add("TypeScript")
+
+        stack.update(self._dependency_names(documents))
 
         return sorted(stack)
+
+    def _dependency_names(self, documents: list[ParsedDocument]) -> set[str]:
+        """Pull actual library/framework names out of dependency manifests
+        instead of guessing tech stack purely from file extensions."""
+        names: set[str] = set()
+
+        pyproject = self._find_document(documents, "pyproject.toml")
+        if pyproject:
+            for line in pyproject.content.splitlines():
+                match = re.match(r'^\s*"([A-Za-z0-9_.-]+)\s*[><=~!]', line.strip())
+                if match:
+                    names.add(match.group(1))
+
+        requirements = self._find_document(documents, "requirements.txt")
+        if requirements:
+            for line in requirements.content.splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                match = re.match(r"^([A-Za-z0-9_.-]+)", stripped)
+                if match:
+                    names.add(match.group(1))
+
+        package_json = self._find_document(documents, "package.json")
+        if package_json:
+            for match in re.finditer(r'"([A-Za-z0-9@/_.-]+)"\s*:\s*"[^"]*"', package_json.content):
+                name = match.group(1)
+                if name not in {"name", "version", "scripts", "dependencies", "devDependencies", "main", "license", "description", "type"}:
+                    names.add(name)
+
+        return names
 
     def _dedupe(self, values: list[str]) -> list[str]:
         seen = set()

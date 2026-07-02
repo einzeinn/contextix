@@ -31,6 +31,7 @@ class AnalysisResult:
     tech_stack: list[str] = field(default_factory=list)
     architecture: str = ""
     constraints: list[str] = field(default_factory=list)
+    non_goals: list[str] = field(default_factory=list)
     features: list[str] = field(default_factory=list)
     decisions: list[str] = field(default_factory=list)
     coding_standards: list[str] = field(default_factory=list)

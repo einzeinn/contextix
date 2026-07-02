@@ -9,6 +9,17 @@ from typing import Any
 import yaml
 
 
+def _str_presenter(dumper: yaml.Dumper, data: str):
+    # Multi-line strings (e.g. architecture diagrams) get dumped with
+    # literal block style ("|") instead of an escaped single line,
+    # so generated context.yaml stays human-readable.
+    style = "|" if "\n" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+yaml.add_representer(str, _str_presenter, Dumper=yaml.SafeDumper)
+
+
 class FileSystemStorage:
     def __init__(self, root: Path) -> None:
         self.root = root
