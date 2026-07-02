@@ -1,5 +1,6 @@
 .git
 .context
+.qwen
 .venv
 venv
 __pycache__
