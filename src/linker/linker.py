@@ -175,16 +175,31 @@ class DocumentLinker:
         return None
 
     def _surrounding_sentence(self, content: str, pos: int) -> str:
-        """Extract the sentence surrounding a position in the text."""
-        # Find sentence start (previous .!? or start of text)
+        """Extract the sentence surrounding a position in the text.
+
+        A period only counts as a sentence boundary when followed by whitespace,
+        end-of-string, or another sentence-ending punctuation — not when followed
+        by a word character (which indicates a filename, abbreviation, or version).
+        """
+        # Backward scan: find previous sentence boundary
         start = pos
-        while start > 0 and content[start - 1] not in ".!?\n":
+        while start > 0:
+            prev = content[start - 1]
+            if prev in "!?\n":
+                break
+            if prev == "." and (start >= len(content) or content[start] in " \t\n\r.!?"):
+                break
             start -= 1
-        # Find sentence end
+
+        # Forward scan: find next sentence boundary
         end = pos
-        while end < len(content) and content[end] not in ".!?\n":
-            end += 1
-        if end < len(content) and content[end] in ".!?":
+        while end < len(content):
+            ch = content[end]
+            if ch in "!?\n":
+                break
+            if ch == "." and (end + 1 >= len(content) or content[end + 1] in " \t\n\r.!?"):
+                end += 1  # include the period
+                break
             end += 1
 
         sentence = content[start:end].strip()

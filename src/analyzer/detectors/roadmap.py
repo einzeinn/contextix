@@ -64,6 +64,7 @@ class RoadmapDetector:
         for doc in documents:
             if doc.file_type != "markdown":
                 continue
+            roadmap.extend(self._stage_items(doc))
             roadmap.extend(self._heading_roadmap(doc))
             roadmap.extend(self._version_items(doc))
 
@@ -85,18 +86,87 @@ class RoadmapDetector:
                 return True
         return False
 
+    # Matches "## Stage N: Title" or "## Stage N: Title (Status)" headings
+    _STAGE_HEADING = re.compile(
+        r"^Stage\s+(\d+)\s*:\s*(.+)$", re.IGNORECASE
+    )
+
+    def _stage_items(self, doc: ParsedDocument) -> list[str]:
+        """Extract roadmap items from ## Stage N: subheadings.
+
+        Each stage heading is followed by deliverable/feature bullet lists.
+        Items are prefixed with the stage title for context.
+        """
+        results: list[str] = []
+        lines = doc.content.splitlines()
+        in_stage = False
+        stage_title = ""
+        in_bullets = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            if stripped.startswith("## "):
+                heading_text = stripped[3:].strip()
+                match = self._STAGE_HEADING.match(heading_text)
+                if match:
+                    in_stage = True
+                    stage_title = f"Stage {match.group(1)}: {match.group(2).strip()}"
+                    in_bullets = False
+                else:
+                    in_stage = False
+                    in_bullets = False
+                continue
+
+            if not in_stage:
+                continue
+
+            # Enter bullet section at **Deliverables:** or **Features:**
+            if re.match(
+                r"^\*\*(?:Deliverables?|Features?|Success\s+Criteria):\*\*$",
+                stripped,
+                re.IGNORECASE,
+            ):
+                in_bullets = True
+                continue
+
+            # Exit bullet section at next bold header
+            if in_bullets and re.match(r"^\*\*[^*]+\*\*$", stripped):
+                in_bullets = False
+                continue
+
+            # Collect bullet items
+            if in_bullets and (stripped.startswith("- ") or stripped.startswith("* ")):
+                item = stripped[2:].strip()
+                if not is_noise(item) and not self._is_poetic(item):
+                    results.append(f"{stage_title} — {item}")
+
+        return results
+
     def _heading_roadmap(self, doc: ParsedDocument) -> list[str]:
         results: list[str] = []
         for pattern in self.ROADMAP_HEADINGS:
             section = extract_section(doc.content, pattern)
-            if section:
-                bullets = extract_bullets(section)
-                if bullets:
-                    results.extend(b for b in bullets if not self._is_poetic(b) and not is_noise(b))
-                else:
-                    for sentence in extract_sentences(section):
-                        if len(sentence) > 15 and not self._is_poetic(sentence) and not is_noise(sentence):
-                            results.append(sentence)
+            if not section:
+                continue
+            # Truncate at first ## subheading if the top-level heading
+            # matched is # Roadmap (H1) — prevents extracting the entire file.
+            if pattern in (r"^roadmap$",) and "##" in section:
+                section = section.split("\n## ")[0]
+            bullets = extract_bullets(section)
+            if bullets:
+                results.extend(
+                    b for b in bullets
+                    if not self._is_poetic(b) and not is_noise(b)
+                )
+            else:
+                for sentence in extract_sentences(section):
+                    if (
+                        len(sentence) > 15
+                        and not self._is_poetic(sentence)
+                        and not is_noise(sentence)
+                    ):
+                        results.append(sentence)
         return results
 
     def _version_items(self, doc: ParsedDocument) -> list[str]:

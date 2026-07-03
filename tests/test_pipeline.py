@@ -261,3 +261,47 @@ class TestGoldenOutput:
         for goal in context.get("goals", []):
             assert not goal.startswith("ADR "), f"ADR title in goals: {goal}"
             assert not goal.startswith("ADR-"), f"ADR title in goals: {goal}"
+
+    def test_reference_context_not_truncated_mid_path(self) -> None:
+        """Reference context field must not truncate before .md extension."""
+        from pathlib import Path
+        import yaml
+        from contextix.core import generate_memory
+
+        project_root = Path(__file__).resolve().parent.parent
+        generate_memory(project_root)
+
+        context = yaml.safe_load(
+            (project_root / ".context" / "context.yaml").read_text(encoding="utf-8")
+        )
+        for ref in context.get("references", []):
+            ctx = ref.get("context", "")
+            # If context contains a markdown link, it must end with the closing )
+            if "](" in ctx:
+                link_start = ctx.index("](")
+                # Find the closing ) after the link
+                close = ctx.find(")", link_start)
+                assert close != -1, (
+                    f"Reference context truncated before closing ): {ctx[:80]}"
+                )
+
+    def test_roadmap_contains_stage_items_not_poetic(self) -> None:
+        """Roadmap must contain stage items, not poetic closing sentences."""
+        from pathlib import Path
+        import yaml
+        from contextix.core import generate_memory
+
+        project_root = Path(__file__).resolve().parent.parent
+        generate_memory(project_root)
+
+        context = yaml.safe_load(
+            (project_root / ".context" / "context.yaml").read_text(encoding="utf-8")
+        )
+        roadmap = context.get("roadmap", [])
+        assert len(roadmap) >= 1, "Roadmap must not be empty"
+        assert any("Stage 0" in r or "Stage 1" in r for r in roadmap), (
+            f"Roadmap must contain stage items: {roadmap[:3]}"
+        )
+        assert not any("Perhaps developers will inherit" in r for r in roadmap), (
+            f"Roadmap must not contain poetic closing sentence"
+        )
