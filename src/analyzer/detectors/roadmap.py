@@ -11,6 +11,7 @@ from .shared import (
     extract_bullets,
     extract_section,
     extract_sentences,
+    is_noise,
 )
 
 
@@ -91,10 +92,10 @@ class RoadmapDetector:
             if section:
                 bullets = extract_bullets(section)
                 if bullets:
-                    results.extend(b for b in bullets if not self._is_poetic(b))
+                    results.extend(b for b in bullets if not self._is_poetic(b) and not is_noise(b))
                 else:
                     for sentence in extract_sentences(section):
-                        if len(sentence) > 15 and not self._is_poetic(sentence):
+                        if len(sentence) > 15 and not self._is_poetic(sentence) and not is_noise(sentence):
                             results.append(sentence)
         return results
 

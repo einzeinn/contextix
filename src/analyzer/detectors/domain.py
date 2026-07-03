@@ -6,7 +6,7 @@ import re
 
 from contextix.models import DomainConcept, ParsedDocument
 
-from .shared import extract_section, extract_sentences
+from .shared import extract_section, extract_sentences, is_noise, strip_table_rows
 
 
 class DomainConceptDetector:
@@ -161,21 +161,22 @@ class DomainConceptDetector:
         results: list[DomainConcept] = []
         # Strip code blocks first — they often contain pipe characters
         clean = re.sub(r"```[\s\S]*?```", "", doc.content)
+        clean = strip_table_rows(clean)  # centralized table filtering
         for line in clean.splitlines():
             stripped = line.strip()
             if not (stripped.startswith("|") and stripped.endswith("|")):
                 continue
-            # Skip separator rows like |------|------|
+            # Skip separator rows
             if re.match(r"^\|[\s\-:|]+\|$", stripped):
                 continue
-            # Skip rows that look like code or list items
             if stripped.startswith("|-") or stripped.startswith("| -"):
                 continue
             cells = [c.strip() for c in stripped.strip("|").split("|")]
             if len(cells) >= 2:
                 term = cells[0].strip().strip("*_")
-                # Skip terms that look like code snippets or list items
                 if term.startswith(("-", '"', "'", "`")):
+                    continue
+                if is_noise(term):
                     continue
                 definition = cells[1].strip().strip("*_")
                 if self._is_valid_term(term) and len(definition) >= 10:

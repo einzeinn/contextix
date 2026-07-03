@@ -139,6 +139,61 @@ def deduplicate_preserve_order(values: list[str]) -> list[str]:
     return result
 
 
+def is_noise(text: str) -> bool:
+    """Return True if the text looks like a non-prose artifact.
+
+    Filters out: package names, dependency lists, table syntax,
+    single-word identifiers, and other extraction garbage.
+    All detectors must use this function — no local copies.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return True
+    # Package names: lowercase, no spaces, common patterns
+    if re.match(r"^[a-z][a-z0-9_.-]+$", stripped):
+        return True
+    # Single words that look like identifiers
+    if len(stripped.split()) == 1 and len(stripped) < 20:
+        return True
+    # Table syntax leaks
+    if "|---" in stripped or "| :" in stripped:
+        return True
+    if stripped.count("|") > 3:
+        return True
+    # ADR titles and metadata
+    if re.match(r"^ADR\s+\d{3,4}[:\s]", stripped, re.IGNORECASE):
+        return True
+    # Headings
+    if re.match(r"^#{1,6}\s", stripped):
+        return True
+    # Metadata prefixes
+    if re.match(r"^(Version|Status|Date|Author):", stripped, re.IGNORECASE):
+        return True
+    # Code blocks
+    if stripped.startswith("```"):
+        return True
+    # Badges
+    if stripped.startswith("[!"):
+        return True
+    # Numbered list (usually steps, not concepts)
+    if re.match(r"^\d+\.\s", stripped):
+        return True
+    return False
+
+
+def strip_table_rows(content: str) -> str:
+    """Remove markdown table rows from text.
+
+    Lines that start and end with | are table rows — not prose.
+    All detectors must use this function — no local copies.
+    """
+    lines = content.splitlines()
+    kept = [line for line in lines if not (
+        line.strip().startswith("|") and line.strip().endswith("|")
+    )]
+    return "\n".join(kept)
+
+
 def extract_section(content: str, heading: str) -> str:
     """Extract text under a markdown heading until the next heading of equal or higher level.
 

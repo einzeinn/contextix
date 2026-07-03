@@ -11,7 +11,8 @@ from .shared import (
     extract_bullets,
     extract_section,
     extract_sentences,
-    find_sections_by_headings,
+    is_noise,
+    strip_table_rows,
 )
 
 
@@ -59,52 +60,27 @@ class ConstraintDetector:
 
         return deduplicate_preserve_order(constraints)
 
-    def _is_noise(self, text: str) -> bool:
-        """Filter out lines that look like package names, dependency lists, or table syntax."""
-        stripped = text.strip()
-        # Package names: lowercase, no spaces, common patterns
-        if re.match(r"^[a-z][a-z0-9_.-]+$", stripped):
-            return True
-        # Single words that look like identifiers
-        if len(stripped.split()) == 1 and len(stripped) < 20:
-            return True
-        # Table syntax leaks
-        if "|---" in stripped or "| :" in stripped:
-            return True
-        if stripped.count("|") > 3:
-            return True
-        return False
-
     def _heading_constraints(self, doc: ParsedDocument) -> list[str]:
         results: list[str] = []
         for pattern in self.CONSTRAINT_HEADINGS:
             section = extract_section(doc.content, pattern)
             if section:
-                section = self._strip_table_rows(section)
+                section = strip_table_rows(section)
                 bullets = extract_bullets(section)
                 if bullets:
                     for b in bullets:
-                        if not self._is_noise(b):
+                        if not is_noise(b):
                             results.append(b)
                 else:
                     for sentence in extract_sentences(section):
-                        if len(sentence) > 15 and not self._is_noise(sentence):
+                        if len(sentence) > 15 and not is_noise(sentence):
                             results.append(sentence)
         return results
-
-    @staticmethod
-    def _strip_table_rows(content: str) -> str:
-        """Remove markdown table rows."""
-        lines = content.splitlines()
-        kept = [line for line in lines if not (
-            line.strip().startswith("|") and line.strip().endswith("|")
-        )]
-        return "\n".join(kept)
 
     def _pattern_constraints(self, doc: ParsedDocument) -> list[str]:
         results: list[str] = []
         for sentence in extract_sentences(doc.content):
-            if self._is_noise(sentence):
+            if is_noise(sentence):
                 continue
             for pat in self.HARD_CONSTRAINT_PATTERNS:
                 if pat.search(sentence):

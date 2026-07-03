@@ -7,7 +7,7 @@ from .domain import DomainConceptDetector
 from .goal import GoalDetector
 from .roadmap import RoadmapDetector
 from .techstack import TechStackDetector
-from .shared import deduplicate_preserve_order, extract_section, extract_bullets
+from .shared import deduplicate_preserve_order, extract_section, extract_bullets, is_noise, strip_table_rows
 
 __all__ = [
     "ArchitectureDetector",
@@ -20,4 +20,6 @@ __all__ = [
     "deduplicate_preserve_order",
     "extract_section",
     "extract_bullets",
+    "is_noise",
+    "strip_table_rows",
 ]

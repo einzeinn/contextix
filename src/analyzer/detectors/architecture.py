@@ -11,6 +11,7 @@ from .shared import (
     extract_bullets,
     extract_section,
     extract_sentences,
+    strip_table_rows,
 )
 
 
@@ -72,7 +73,7 @@ class ArchitectureDetector:
                 section = extract_section(doc.content, heading)
                 if section:
                     clean = self._strip_code_blocks(section)
-                    clean = self._strip_table_rows(clean)
+                    clean = strip_table_rows(clean)
                     if len(clean) > 30:
                         parts.append(clean)
                         break
@@ -126,15 +127,5 @@ class ArchitectureDetector:
 
     @staticmethod
     def _strip_code_blocks(content: str) -> str:
-        """Remove fenced code blocks (```...```) so regex/source artifacts
-        inside code samples are not mistaken for architecture descriptions."""
+        """Remove fenced code blocks."""
         return re.sub(r"```[\s\S]*?```", "", content)
-
-    @staticmethod
-    def _strip_table_rows(content: str) -> str:
-        """Remove markdown table rows so tables are not treated as prose."""
-        lines = content.splitlines()
-        kept = [line for line in lines if not (
-            line.strip().startswith("|") and line.strip().endswith("|")
-        )]
-        return "\n".join(kept)
