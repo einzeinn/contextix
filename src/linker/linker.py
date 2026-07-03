@@ -190,4 +190,10 @@ class DocumentLinker:
         sentence = content[start:end].strip()
         # Clean up markdown formatting
         sentence = re.sub(r"\s+", " ", sentence)
-        return sentence[:200]  # Cap at 200 chars
+        # Truncate at word boundary
+        if len(sentence) > 200:
+            cut = sentence.rfind(" ", 0, 200)
+            if cut == -1:
+                cut = 200
+            sentence = sentence[:cut].rstrip() + "..."
+        return sentence

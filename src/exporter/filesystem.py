@@ -10,6 +10,21 @@ from contextix.models import Decision, DomainConcept, Metadata, ProjectMemory, S
 from contextix.storage import FileSystemStorage
 
 
+def _truncate_at_word(text: str, max_chars: int) -> str:
+    """Truncate text at the last word boundary before max_chars.
+
+    If the text is shorter than max_chars, return it unchanged.
+    If truncated, append '...' at a word boundary.
+    """
+    if len(text) <= max_chars:
+        return text
+    # Find the last space within the limit
+    cut = text.rfind(" ", 0, max_chars)
+    if cut == -1:
+        cut = max_chars
+    return text[:cut].rstrip() + "..."
+
+
 class FileSystemExporter:
     def __init__(self, output_dir: Path) -> None:
         self.storage = FileSystemStorage(output_dir)
@@ -64,7 +79,7 @@ class FileSystemExporter:
             memory.project.description,
             "",
             "## Purpose",
-            memory.vision[:300] if memory.vision else memory.project.description,
+            _truncate_at_word(memory.vision, 300) if memory.vision else memory.project.description,
             "",
         ]
 
@@ -75,16 +90,16 @@ class FileSystemExporter:
         if key_decisions:
             lines.append("## Key Decisions")
             for d in key_decisions:
-                lines.append(f"- {d.what[:120]}")
+                lines.append(f"- {_truncate_at_word(d.what, 120)}")
                 if d.why:
-                    lines.append(f"  _{d.why[:150]}_")
+                    lines.append(f"  _{_truncate_at_word(d.why, 150)}_")
             lines.append("")
 
         # Top constraints (guardrails)
         if memory.constraints:
             lines.append("## Constraints")
             for c in memory.constraints[:5]:
-                lines.append(f"- {c[:120]}")
+                lines.append(f"- {_truncate_at_word(c, 120)}")
             lines.append("")
 
         # Navigation
@@ -136,7 +151,7 @@ class FileSystemExporter:
         """Return a concise architecture summary for context.yaml.
 
         The full architecture text lives in architecture.md — context.yaml
-        gets only the first meaningful paragraph to avoid token bloat.
+        gets only the first meaningful paragraph, skipping tables and labels.
         """
         text = memory.architecture.strip()
         if not text or text == "Architecture summary was not detected.":
@@ -144,7 +159,14 @@ class FileSystemExporter:
 
         for line in text.splitlines():
             stripped = line.strip()
-            if not stripped or stripped.startswith("#") or stripped.startswith("**"):
+            # Skip headings, labels, table rows, empty lines
+            if not stripped:
+                continue
+            if stripped.startswith("#"):
+                continue
+            if stripped.startswith("**"):
+                continue
+            if stripped.startswith("|") and stripped.endswith("|"):
                 continue
             if len(stripped) > 40:
                 return stripped

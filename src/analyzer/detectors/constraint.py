@@ -60,13 +60,18 @@ class ConstraintDetector:
         return deduplicate_preserve_order(constraints)
 
     def _is_noise(self, text: str) -> bool:
-        """Filter out lines that look like package names or dependency lists."""
+        """Filter out lines that look like package names, dependency lists, or table syntax."""
         stripped = text.strip()
         # Package names: lowercase, no spaces, common patterns
         if re.match(r"^[a-z][a-z0-9_.-]+$", stripped):
             return True
         # Single words that look like identifiers
         if len(stripped.split()) == 1 and len(stripped) < 20:
+            return True
+        # Table syntax leaks
+        if "|---" in stripped or "| :" in stripped:
+            return True
+        if stripped.count("|") > 3:
             return True
         return False
 
@@ -99,6 +104,8 @@ class ConstraintDetector:
     def _pattern_constraints(self, doc: ParsedDocument) -> list[str]:
         results: list[str] = []
         for sentence in extract_sentences(doc.content):
+            if self._is_noise(sentence):
+                continue
             for pat in self.HARD_CONSTRAINT_PATTERNS:
                 if pat.search(sentence):
                     results.append(sentence)

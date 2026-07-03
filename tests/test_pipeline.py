@@ -139,8 +139,32 @@ class TestFullPipelineIntegration:
             (tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8")
         )
 
-        issues = context.get("validation_issues", [])
-        assert any("rationale" in i.lower() for i in issues)
+        # Validator is now a CLI subcommand, not in the generate pipeline.
+        # Validation issues are available via programmatic use of ContextValidator.
+        from contextix.validator import ContextValidator
+        from contextix.models import ParsedDocument
+
+        docs = [
+            ParsedDocument(
+                source="docs/adr/0001-no-rationale.md",
+                content=(tmp_path / "docs" / "adr" / "0001-no-rationale.md").read_text(encoding="utf-8"),
+                file_type="markdown",
+            ),
+            ParsedDocument(
+                source="README.md",
+                content=(tmp_path / "README.md").read_text(encoding="utf-8"),
+                file_type="markdown",
+            ),
+        ]
+        from contextix.models import ContextIR, Decision, ProjectIdentity
+        ctx = ContextIR(
+            project=ProjectIdentity(name="Test", description=""),
+            decisions=[
+                Decision(what="Use something.", why="", source="docs/adr/0001-no-rationale.md"),
+            ],
+        )
+        result = ContextValidator().validate(docs, ctx)
+        assert any("rationale" in i.lower() for i in result.validation_issues)
 
     def test_output_deterministic(self, tmp_path: Path) -> None:
         (tmp_path / "README.md").write_text("# Test\n\nTest project.\n", encoding="utf-8")
@@ -156,3 +180,84 @@ class TestFullPipelineIntegration:
         ctx2 = yaml.safe_load((tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8"))
 
         assert ctx1 == ctx2
+
+
+class TestGoldenOutput:
+    """Golden-output tests on the real project.
+
+    These catch regression bugs: table syntax leaks, mid-word truncation,
+    empty categories that should be populated.
+    """
+
+    def test_no_table_syntax_in_output(self) -> None:
+        """Generate on the real project — no |---| or | Column | in any output."""
+        from pathlib import Path
+        from contextix.core import generate_memory
+
+        project_root = Path(__file__).resolve().parent.parent
+        generate_memory(project_root)
+
+        output_dir = project_root / ".context"
+        for fname in ["context.yaml", "bootstrap.md", "summary.md", "handoff.md"]:
+            content = (output_dir / fname).read_text(encoding="utf-8")
+            assert "|---" not in content, f"{fname} contains table separator |---"
+            assert "| :" not in content, f"{fname} contains table alignment | :"
+            # Also check individual pipe-columns that aren't markdown links
+            for line in content.splitlines():
+                if line.strip().startswith("|") and "|" in line[2:]:
+                    # Allow YAML multi-line strings starting with |
+                    if not line.strip().startswith("| "):
+                        continue
+                    assert False, f"{fname} contains table row: {line[:80]}"
+
+    def test_no_mid_word_truncation(self) -> None:
+        """Truncation should always happen at word boundaries."""
+        from pathlib import Path
+        from contextix.core import generate_memory
+
+        project_root = Path(__file__).resolve().parent.parent
+        generate_memory(project_root)
+
+        bootstrap = (project_root / ".context" / "bootstrap.md").read_text(encoding="utf-8")
+        for line in bootstrap.splitlines():
+            stripped = line.strip()
+            if "..." in stripped:
+                # Check that "..." comes after a complete word
+                before = stripped.split("...")[0].rstrip()
+                if before:
+                    last_char = before[-1]
+                    assert last_char.isalpha() or last_char in ".!?", (
+                        f"Truncation cuts mid-word: {stripped[:80]}"
+                    )
+
+    def test_domain_concepts_not_empty(self) -> None:
+        """The real project has domain concepts — they must be detected."""
+        from pathlib import Path
+        import yaml
+        from contextix.core import generate_memory
+
+        project_root = Path(__file__).resolve().parent.parent
+        generate_memory(project_root)
+
+        context = yaml.safe_load(
+            (project_root / ".context" / "context.yaml").read_text(encoding="utf-8")
+        )
+        assert len(context.get("domain_concepts", [])) >= 3, (
+            "Domain concepts should be detected in the real project"
+        )
+
+    def test_no_adr_titles_in_goals(self) -> None:
+        """Goals should not contain ADR document titles."""
+        from pathlib import Path
+        import yaml
+        from contextix.core import generate_memory
+
+        project_root = Path(__file__).resolve().parent.parent
+        generate_memory(project_root)
+
+        context = yaml.safe_load(
+            (project_root / ".context" / "context.yaml").read_text(encoding="utf-8")
+        )
+        for goal in context.get("goals", []):
+            assert not goal.startswith("ADR "), f"ADR title in goals: {goal}"
+            assert not goal.startswith("ADR-"), f"ADR title in goals: {goal}"

@@ -16,6 +16,7 @@ from contextix.models import (
     ProjectIdentity,
     ProjectState,
 )
+from contextix.linker import DocumentLinker
 
 from .detectors import (
     ArchitectureDetector,
@@ -71,7 +72,9 @@ class BasicAnalyzer:
             project_state=self._extract_project_state(documents),
         )
 
-        return ContextIR(**result.__dict__)
+        context = ContextIR(**result.__dict__)
+        context = DocumentLinker().link(documents, context)
+        return context
 
     def _extract_project_state(self, documents: list[ParsedDocument]) -> ProjectState:
         version = self._detect_version(documents)
