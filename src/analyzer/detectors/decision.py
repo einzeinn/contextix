@@ -10,6 +10,7 @@ from .shared import (
     extract_bullets,
     extract_section,
     extract_sentences,
+    is_noise,
 )
 
 
@@ -36,12 +37,15 @@ class DecisionDetector:
         re.compile(r"(?:we|I|team)\s+decided\s+to\s+", re.IGNORECASE),
         re.compile(r"(?:we|I|team)\s+opted\s+(?:for|to)\s+", re.IGNORECASE),
         re.compile(r"decision\s*(?::|was|is)\s+to\s+", re.IGNORECASE),
-        re.compile(r"(?:instead|rather)\s+than\s+", re.IGNORECASE),
         re.compile(r"in\s+favor\s+of\s+", re.IGNORECASE),
         re.compile(r"trade-?off\s*(?::|between|is)\s+", re.IGNORECASE),
         re.compile(r"\b(vs\.?|versus)\b.*\b(?:because|since|as)\b", re.IGNORECASE),
-        re.compile(r"(?:prefer|preferred|chose)\s+\S+\s+over\s+", re.IGNORECASE),
     ]
+
+    # Documents that should not be scanned for inline decisions
+    _NON_DECISION_SOURCES = {
+        "docs/roadmap.md", "docs/contributing.md", "MANIFESTO.md",
+    }
 
     RATIONALE_HEADINGS = [
         r"^rationale$",
@@ -71,7 +75,7 @@ class DecisionDetector:
         if not what_section:
             return []
 
-        # Try to find the rationale section
+        # Find the rationale — applies to the overall approach, not each bullet
         why = ""
         for heading in self.RATIONALE_HEADINGS:
             rationale = extract_section(doc.content, heading)
@@ -79,22 +83,33 @@ class DecisionDetector:
                 why = self._first_paragraph(rationale)
                 break
 
-        # Extract bullet items or first paragraph as individual decisions
+        # Extract bullet items or first paragraph
         bullets = extract_bullets(what_section)
         if bullets:
-            return [
-                Decision(what=bullet, why=why, source=doc.source)
-                for bullet in bullets
-            ]
+            decisions: list[Decision] = []
+            for i, bullet in enumerate(bullets):
+                if is_noise(bullet):
+                    continue
+                # Only the first bullet gets the rationale — it's the main decision
+                decisions.append(
+                    Decision(
+                        what=bullet,
+                        why=why if i == 0 else "",
+                        source=doc.source,
+                    )
+                )
+            return decisions
 
         paragraph = self._first_paragraph(what_section)
-        if paragraph:
+        if paragraph and not is_noise(paragraph):
             return [Decision(what=paragraph, why=why, source=doc.source)]
 
         return []
 
     def _heading_decisions(self, doc: ParsedDocument) -> list[Decision]:
         results: list[Decision] = []
+        if doc.source.lower() in self._NON_DECISION_SOURCES:
+            return results
         for pattern in self.DECISION_HEADINGS:
             section = extract_section(doc.content, pattern)
             if not section:
@@ -102,16 +117,22 @@ class DecisionDetector:
             bullets = extract_bullets(section)
             if bullets:
                 for bullet in bullets:
-                    results.append(Decision(what=bullet, source=doc.source))
+                    if not is_noise(bullet):
+                        results.append(Decision(what=bullet, source=doc.source))
             else:
                 for sentence in extract_sentences(section):
-                    if len(sentence) > 15:
+                    if len(sentence) > 15 and not is_noise(sentence):
                         results.append(Decision(what=sentence, source=doc.source))
         return results
 
     def _inline_decisions(self, doc: ParsedDocument) -> list[Decision]:
         results: list[Decision] = []
+        # Skip documents that don't contain architectural decisions
+        if doc.source.lower() in self._NON_DECISION_SOURCES:
+            return results
         for sentence in extract_sentences(doc.content):
+            if is_noise(sentence):
+                continue
             for pat in self.INLINE_PATTERNS:
                 if pat.search(sentence):
                     results.append(Decision(what=sentence, source=doc.source))
