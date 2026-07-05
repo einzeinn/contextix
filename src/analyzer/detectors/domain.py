@@ -127,15 +127,44 @@ class DomainConceptDetector:
                             or first_word in {"is", "are", "was", "were", "a", "an", "the"}
                         ):
                             break
+                        definition = next_line[:200].rstrip(".")
+                        # If the paragraph introduces a list ("... MUST include:")
+                        # the real content lives in the bullets that follow, not
+                        # in the intro line alone — pull them in too.
+                        if definition.rstrip().endswith(":"):
+                            bullet_items = self._collect_following_bullets(lines, j + 1)
+                            if bullet_items:
+                                definition = definition.rstrip() + " " + "; ".join(bullet_items)
                         results.append(
                             DomainConcept(
                                 term=term,
-                                definition=next_line[:200].rstrip("."),
+                                definition=definition,
                                 source=doc.source,
                             )
                         )
                     break
         return results
+
+    def _collect_following_bullets(self, lines: list[str], start: int) -> list[str]:
+        """Collect consecutive bullet-list items starting at `start`.
+
+        Stops at the first blank line followed by non-bullet content, the
+        next heading, or the end of the list. Used to recover definitions
+        that are introduced by a colon line ("... MUST include:") followed
+        by a markdown list rather than inline prose.
+        """
+        items: list[str] = []
+        for line in lines[start:]:
+            stripped = line.strip()
+            if not stripped:
+                if items:
+                    break
+                continue
+            if stripped.startswith(("- ", "* ")):
+                items.append(stripped[2:].strip())
+                continue
+            break
+        return items
 
     def _inline_definitions(self, doc: ParsedDocument) -> list[DomainConcept]:
         results: list[DomainConcept] = []

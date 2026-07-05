@@ -94,11 +94,24 @@ class ArchitectureDetector:
         return self._detect_patterns(documents)
 
     def _detect_patterns(self, documents: list[ParsedDocument]) -> list[str]:
+        """Detect known architecture pattern names.
+
+        Matches against individual sentences (extract_sentences), not raw
+        doc.content. Matching against the raw document let the non-greedy
+        `.*?` gap between the trigger verb ("uses", "is a", ...) and the
+        pattern keyword span across unrelated headings, list items, and
+        paragraphs — falsely tagging a pattern whenever the two words
+        happened to appear anywhere in the same document. Restricting the
+        search to one real sentence at a time keeps the match meaningful.
+        """
         found: set[str] = set()
         for doc in documents:
-            for name, pattern in self.KNOWN_PATTERNS:
-                if pattern.search(doc.content):
-                    found.add(name)
+            if doc.file_type != "markdown":
+                continue
+            for sentence in extract_sentences(self._strip_code_blocks(doc.content)):
+                for name, pattern in self.KNOWN_PATTERNS:
+                    if pattern.search(sentence):
+                        found.add(name)
         return sorted(found)
 
     def _detect_components(self, documents: list[ParsedDocument]) -> list[str]:

@@ -96,20 +96,42 @@ def _list_item_text(node: dict) -> str:
     return " ".join(parts)
 
 
+def _ensure_terminal(text: str) -> str:
+    """Ensure text ends with sentence-terminating punctuation.
+
+    Headings and list items often don't end with a period in the source
+    markdown. When these fragments get joined into a single prose blob
+    (see _ast_plain_text), a missing terminator lets sentence-splitting
+    regexes bleed across unrelated headings/list items into one giant
+    pseudo-sentence. Adding a terminator here fixes that at the source,
+    for every detector that relies on extract_sentences().
+    """
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+    if stripped[-1] not in ".!?":
+        stripped += "."
+    return stripped
+
+
 def _ast_plain_text(nodes: list[dict]) -> str:
     """Extract all prose text from AST nodes, skipping code blocks and blank lines.
 
     Used by extract_sentences to get clean prose for sentence splitting.
+
+    Each heading and list item is terminated with punctuation before being
+    joined, so that unrelated fragments never merge into a single sentence
+    during splitting (see _ensure_terminal).
     """
     parts: list[str] = []
     for node in nodes:
         t = node["type"]
         if t == "paragraph":
-            parts.append(_inline_text(node))
+            parts.append(_ensure_terminal(_inline_text(node)))
         elif t == "list":
             for item in node.get("children", []):
                 if item["type"] == "list_item":
-                    parts.append(_list_item_text(item))
+                    parts.append(_ensure_terminal(_list_item_text(item)))
         elif t == "block_code":
             continue  # code is never prose
         elif t == "block_html":
@@ -118,10 +140,10 @@ def _ast_plain_text(nodes: list[dict]) -> str:
             continue
         elif t == "heading":
             # Heading text can be useful context — include it.
-            parts.append(_heading_text(node))
+            parts.append(_ensure_terminal(_heading_text(node)))
         elif t == "thematic_break":
             continue
-    return " ".join(parts)
+    return " ".join(p for p in parts if p)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +201,50 @@ def is_noise(text: str) -> bool:
     if re.match(r"^\d+\.\s", stripped):
         return True
     return False
+
+
+def is_quoted_example(text: str) -> bool:
+    """Return True if the sentence is a quoted example/illustration rather
+    than an actual assertion.
+
+    Docs often illustrate a writing convention like:
+        "We chose Redis because X" is portable.
+        "We chose Redis" is not.
+    These contain decision/constraint keywords (e.g. "chose", "cannot")
+    purely as teaching examples, not as real project decisions or
+    constraints. All detectors that scan free-text sentences for keyword
+    patterns must call this before treating a sentence as a match.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # Sentence opens with a quotation mark — almost always an illustration
+    # or citation, not a first-person assertion about the project.
+    if stripped[0] in "\"'\u201c\u2018":
+        return True
+    # Quoted span immediately followed by a short meta-comment
+    # ("... is portable.", "... is not.", "... means X").
+    if re.search(
+        r'["\u201c].{3,}?["\u201d]\s+(?:is|isn\'t|is\s+not|was|means|implies)\b',
+        stripped,
+        re.IGNORECASE,
+    ):
+        return True
+    return False
+
+def is_rhetorical_negation(text: str) -> bool:
+    """Return True if the sentence is a rhetorical contrast opener rather
+    than a real constraint or decision.
+
+    Persuasive/philosophy docs often use a "Not because X. But because Y."
+    structure to build an argument:
+        "Not because the AI cannot read source code."
+        "But because the AI has lost the project's accumulated understanding."
+    The first half contains constraint-like keywords ("cannot") purely as
+    part of a rhetorical setup, not as an actual project rule.
+    """
+    stripped = text.strip()
+    return bool(re.match(r"^not\s+because\b", stripped, re.IGNORECASE))
 
 
 def strip_table_rows(content: str) -> str:

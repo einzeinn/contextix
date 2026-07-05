@@ -11,6 +11,7 @@ from .shared import (
     extract_section,
     extract_sentences,
     is_noise,
+    is_quoted_example,
 )
 
 
@@ -132,6 +133,11 @@ class DecisionDetector:
             return results
         for sentence in extract_sentences(doc.content):
             if is_noise(sentence):
+                continue
+            # Skip quoted illustrative examples, e.g. docs that teach writing
+            # style with '"We chose Redis because X" is portable.' — these
+            # contain decision keywords but aren't real project decisions.
+            if is_quoted_example(sentence):
                 continue
             for pat in self.INLINE_PATTERNS:
                 if pat.search(sentence):
