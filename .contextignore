@@ -11,7 +11,7 @@
 contextix.yaml.local
 
 # ============================================================================
-# AI Agent Runtime
+# AI Agent Runtime (folder konfigurasi AI tools)
 # ============================================================================
 .qwen
 .claude
@@ -29,7 +29,6 @@ contextix.yaml.local
 venv
 env
 ENV
-
 __pycache__
 .pytest_cache
 .mypy_cache
@@ -38,9 +37,12 @@ __pycache__
 .coverage
 htmlcov
 *.pyc
+*.pyo
+*.pyd
+pip-wheel-metadata/   # <-- Tambahan
 
 # ============================================================================
-# JavaScript / Node
+# JavaScript / Node / Next.js
 # ============================================================================
 node_modules
 .npm
@@ -50,12 +52,35 @@ node_modules
 .nuxt
 dist
 build
+.out
+.vercel                 # <-- Tambahan (deploy artifacts Vercel)
+.wrangler               # <-- Tambahan (Cloudflare Workers config)
+.nx                     # <-- Tambahan (Nx cache)
+.cache                  # <-- Tambahan (cache umum)
+*.log                   # <-- Pindahkan ke bagian Logs
+
+# Lock files (biasanya tidak perlu diparse)
+package-lock.json       # <-- Tambahan
+yarn.lock               # <-- Tambahan
+pnpm-lock.yaml          # <-- Tambahan
 
 # ============================================================================
-# IDE
+# Environment & Secrets
+# ============================================================================
+.env
+.env.local
+.env.*
+!.env.example           # <-- Kecuali contoh env (bisa jadi dokumentasi)
+
+# ============================================================================
+# IDE / Editor
 # ============================================================================
 .vscode
 .idea
+*.swp
+*.swo
+*.swn
+*~
 
 # ============================================================================
 # Operating System
@@ -64,13 +89,9 @@ build
 Thumbs.db
 
 # ============================================================================
-# Logs
+# Logs & Temporary
 # ============================================================================
 *.log
-
-# ============================================================================
-# Temporary
-# ============================================================================
 tmp
 temp
 .cache

@@ -68,7 +68,10 @@ class RepositoryParser:
             if file_type is None:
                 continue
 
-            if self.enabled_file_types is not None and file_type not in self.enabled_file_types:
+            if (
+                self.enabled_file_types is not None
+                and file_type not in self.enabled_file_types
+            ):
                 continue
 
             if path.stat().st_size > self.max_file_bytes:
@@ -144,8 +147,30 @@ class RepositoryParser:
         return patterns
 
     def _matches_contextignore(self, relative: str) -> bool:
+        relative = relative.replace("\\", "/")
         for pattern in self.ignore_patterns:
             normalized = pattern.replace("\\", "/").strip("/")
+            if not normalized:
+                continue
+
             if fnmatch(relative, normalized) or fnmatch(relative, f"{normalized}/*"):
+                return True
+
+            if normalized.endswith("/**"):
+                prefix = normalized[: -3].rstrip("/")
+                if relative == prefix or relative.startswith(f"{prefix}/"):
+                    return True
+
+            if normalized.startswith("**/"):
+                suffix = normalized[3:].lstrip("/")
+                if relative == suffix or relative.endswith(f"/{suffix}"):
+                    return True
+
+            if (
+                relative == normalized
+                or relative.startswith(f"{normalized}/")
+                or relative.endswith(f"/{normalized}")
+                or f"/{normalized}/" in f"/{relative}/"
+            ):
                 return True
         return False

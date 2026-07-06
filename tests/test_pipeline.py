@@ -26,7 +26,9 @@ def test_generate_memory_creates_context_files(tmp_path: Path) -> None:
     assert (tmp_path / ".context" / "snapshot.json").exists()
     assert (tmp_path / ".context" / "metadata.json").exists()
 
-    context = yaml.safe_load((tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8"))
+    context = yaml.safe_load(
+        (tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8")
+    )
     assert context["project"]["name"] == "Demo"
     assert context["goals"] == ["Preserve context"]
     assert context["features"] == ["Memory export"]
@@ -62,6 +64,20 @@ def test_repository_parser_skips_known_lockfiles(tmp_path: Path) -> None:
     assert len(documents) == 1
 
 
+def test_repository_parser_ignores_nested_node_modules(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    nested = tmp_path / "src" / "node_modules" / "next" / "dist" / "docs"
+    nested.mkdir(parents=True)
+    (nested / "README.md").write_text("# Nested\n", encoding="utf-8")
+    (tmp_path / ".contextignore").write_text("node_modules\n", encoding="utf-8")
+
+    parser = RepositoryParser(tmp_path)
+    documents = parser.parse()
+
+    assert all("node_modules" not in doc.source for doc in documents)
+    assert len(documents) == 1
+
+
 class TestFullPipelineIntegration:
     """End-to-end tests: raw files → .context/ output."""
 
@@ -83,7 +99,9 @@ class TestFullPipelineIntegration:
         assert (context_dir / "metadata.json").exists()
 
     def test_adr_with_rationale_paired(self, tmp_path: Path) -> None:
-        (tmp_path / "README.md").write_text("# Test\n\nTest project.\n", encoding="utf-8")
+        (tmp_path / "README.md").write_text(
+            "# Test\n\nTest project.\n", encoding="utf-8"
+        )
         (tmp_path / "docs" / "adr").mkdir(parents=True)
         (tmp_path / "docs" / "adr" / "0001-cache.md").write_text(
             "# ADR 0001: Cache\n\n"
@@ -149,7 +167,7 @@ class TestFullPipelineIntegration:
         )
 
         generate_memory(tmp_path)
-        context = yaml.safe_load(
+        yaml.safe_load(
             (tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8")
         )
 
@@ -161,7 +179,9 @@ class TestFullPipelineIntegration:
         docs = [
             ParsedDocument(
                 source="docs/adr/0001-no-rationale.md",
-                content=(tmp_path / "docs" / "adr" / "0001-no-rationale.md").read_text(encoding="utf-8"),
+                content=(tmp_path / "docs" / "adr" / "0001-no-rationale.md").read_text(
+                    encoding="utf-8"
+                ),
                 file_type="markdown",
             ),
             ParsedDocument(
@@ -171,27 +191,38 @@ class TestFullPipelineIntegration:
             ),
         ]
         from contextix.models import ContextIR, Decision, ProjectIdentity
+
         ctx = ContextIR(
             project=ProjectIdentity(name="Test", description=""),
             decisions=[
-                Decision(what="Use something.", why="", source="docs/adr/0001-no-rationale.md"),
+                Decision(
+                    what="Use something.",
+                    why="",
+                    source="docs/adr/0001-no-rationale.md",
+                ),
             ],
         )
         result = ContextValidator().validate(docs, ctx)
         assert any("rationale" in i.lower() for i in result.validation_issues)
 
     def test_output_deterministic(self, tmp_path: Path) -> None:
-        (tmp_path / "README.md").write_text("# Test\n\nTest project.\n", encoding="utf-8")
+        (tmp_path / "README.md").write_text(
+            "# Test\n\nTest project.\n", encoding="utf-8"
+        )
 
         result1 = generate_memory(tmp_path)
         result2 = generate_memory(tmp_path)
 
         assert result1.document_count == result2.document_count
 
-        ctx1 = yaml.safe_load((tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8"))
+        ctx1 = yaml.safe_load(
+            (tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8")
+        )
         # Run again — output must be identical
         generate_memory(tmp_path)
-        ctx2 = yaml.safe_load((tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8"))
+        ctx2 = yaml.safe_load(
+            (tmp_path / ".context" / "context.yaml").read_text(encoding="utf-8")
+        )
 
         assert ctx1 == ctx2
 
@@ -232,7 +263,9 @@ class TestGoldenOutput:
         project_root = Path(__file__).resolve().parent.parent
         generate_memory(project_root)
 
-        bootstrap = (project_root / ".context" / "bootstrap.md").read_text(encoding="utf-8")
+        bootstrap = (project_root / ".context" / "bootstrap.md").read_text(
+            encoding="utf-8"
+        )
         for line in bootstrap.splitlines():
             stripped = line.strip()
             if "..." in stripped:
@@ -240,9 +273,9 @@ class TestGoldenOutput:
                 before = stripped.split("...")[0].rstrip()
                 if before:
                     last_char = before[-1]
-                    assert last_char.isalpha() or last_char in ".!?", (
-                        f"Truncation cuts mid-word: {stripped[:80]}"
-                    )
+                    assert (
+                        last_char.isalpha() or last_char in ".!?"
+                    ), f"Truncation cuts mid-word: {stripped[:80]}"
 
     def test_domain_concepts_not_empty(self) -> None:
         """The real project has domain concepts — they must be detected."""
@@ -256,9 +289,9 @@ class TestGoldenOutput:
         context = yaml.safe_load(
             (project_root / ".context" / "context.yaml").read_text(encoding="utf-8")
         )
-        assert len(context.get("domain_concepts", [])) >= 3, (
-            "Domain concepts should be detected in the real project"
-        )
+        assert (
+            len(context.get("domain_concepts", [])) >= 3
+        ), "Domain concepts should be detected in the real project"
 
     def test_no_adr_titles_in_goals(self) -> None:
         """Goals should not contain ADR document titles."""
@@ -295,9 +328,9 @@ class TestGoldenOutput:
                 link_start = ctx.index("](")
                 # Find the closing ) after the link
                 close = ctx.find(")", link_start)
-                assert close != -1, (
-                    f"Reference context truncated before closing ): {ctx[:80]}"
-                )
+                assert (
+                    close != -1
+                ), f"Reference context truncated before closing ): {ctx[:80]}"
 
     def test_roadmap_contains_stage_items_not_poetic(self) -> None:
         """Roadmap must contain stage items, not poetic closing sentences."""
@@ -313,9 +346,9 @@ class TestGoldenOutput:
         )
         roadmap = context.get("roadmap", [])
         assert len(roadmap) >= 1, "Roadmap must not be empty"
-        assert any("Stage 0" in r or "Stage 1" in r for r in roadmap), (
-            f"Roadmap must contain stage items: {roadmap[:3]}"
-        )
-        assert not any("Perhaps developers will inherit" in r for r in roadmap), (
-            f"Roadmap must not contain poetic closing sentence"
-        )
+        assert any(
+            "Stage 0" in r or "Stage 1" in r for r in roadmap
+        ), f"Roadmap must contain stage items: {roadmap[:3]}"
+        assert not any(
+            "Perhaps developers will inherit" in r for r in roadmap
+        ), "Roadmap must not contain poetic closing sentence"
