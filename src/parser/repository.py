@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -37,6 +38,13 @@ SKIP_DIRS = {
     "build",
 }
 
+LOCKFILE_NAMES = {
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+}
+
 
 class RepositoryParser:
     """Parse supported repository files into normalized documents."""
@@ -55,10 +63,7 @@ class RepositoryParser:
     def parse(self) -> list[ParsedDocument]:
         documents: list[ParsedDocument] = []
 
-        for path in sorted(self.root.rglob("*")):
-            if not path.is_file() or self._should_skip(path):
-                continue
-
+        for path in self._iter_candidate_files():
             file_type = TEXT_SUFFIXES.get(path.suffix.lower())
             if file_type is None:
                 continue
@@ -87,10 +92,39 @@ class RepositoryParser:
 
         return documents
 
-    def _should_skip(self, path: Path) -> bool:
-        relative_parts = path.relative_to(self.root).parts
-        relative = path.relative_to(self.root).as_posix()
-        return any(part in SKIP_DIRS for part in relative_parts) or self._matches_contextignore(relative)
+    def _iter_candidate_files(self):
+        """Walk the tree, pruning skipped directories as we go.
+
+        The previous implementation used `root.rglob("*")` and filtered
+        SKIP_DIRS / .contextignore *after* the fact — which meant every
+        file inside .git, node_modules, venv, etc. was still enumerated
+        and stat'd before being discarded. On a real project those
+        directories can hold tens of thousands of files, so the old
+        approach could take minutes with zero output before generate
+        even started doing real work. `os.walk` lets us prune `dirnames`
+        in place, so we never descend into an ignored directory at all.
+        """
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirpath_path = Path(dirpath)
+
+            pruned = []
+            for d in dirnames:
+                if d in SKIP_DIRS:
+                    continue
+                rel = (dirpath_path / d).relative_to(self.root).as_posix()
+                if self._matches_contextignore(rel):
+                    continue
+                pruned.append(d)
+            dirnames[:] = pruned
+
+            for filename in sorted(filenames):
+                if filename in LOCKFILE_NAMES:
+                    continue
+                path = dirpath_path / filename
+                relative = path.relative_to(self.root).as_posix()
+                if self._matches_contextignore(relative):
+                    continue
+                yield path
 
     def _language_for(self, file_type: str) -> str | None:
         if file_type in {"markdown", "text", "toml", "yaml", "json"}:

@@ -18,6 +18,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="contextix", description="Generate AI-ready project memory.")
     parser.add_argument("command", nargs="?", default="generate", choices=["generate", "init", "validate", "version"])
     parser.add_argument("--root", default=".", help="Project root. Defaults to current directory.")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
     args = parser.parse_args()
 
     root = Path(args.root).resolve()

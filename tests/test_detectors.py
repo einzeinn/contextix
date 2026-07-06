@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from contextix.analyzer import BasicAnalyzer
 from contextix.analyzer.detectors import (
@@ -316,6 +317,18 @@ class TestRoadmapDetector:
         roadmap = RoadmapDetector().detect([doc])
         assert any("next quarter" in r for r in roadmap)
 
+    def test_progression_lines_skip_non_markdown(self) -> None:
+        docs = [
+            make_doc("README.md", "No roadmap here.\n"),
+            make_doc(
+                "package-lock.json",
+                '{"deprecated": "This version is no longer supported. Please see https://eslint.org/version-support."}',
+                file_type="json",
+            ),
+        ]
+        roadmap = RoadmapDetector().detect(docs)
+        assert roadmap == []
+
 
 class TestBasicAnalyzerIntegration:
     def test_full_pipeline_with_new_detectors(self, tmp_path: Path) -> None:
@@ -461,6 +474,15 @@ class TestExtractionRegression:
         sentences = extract_sentences(text)
         combined = " ".join(sentences)
         assert "become: a replacement" in combined
+
+    def test_extract_section_falls_back_when_mistune_fails(self) -> None:
+        from contextix.analyzer.detectors.shared import extract_section
+
+        content = "# Overview\n\n## Details\n\nSome content.\n\n## Next\n\nMore content.\n"
+        with patch("contextix.analyzer.detectors.shared.mistune.create_markdown", side_effect=ValueError("boom")):
+            result = extract_section(content, "Details")
+
+        assert "Some content." in result
 
     def test_table_rows_filtered_from_extract_sentences(self) -> None:
         from contextix.analyzer.detectors.shared import extract_sentences

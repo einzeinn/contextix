@@ -3,6 +3,7 @@ from pathlib import Path
 import yaml
 
 from contextix.core import generate_memory
+from contextix.parser import RepositoryParser
 
 
 def test_generate_memory_creates_context_files(tmp_path: Path) -> None:
@@ -46,6 +47,19 @@ def test_generate_memory_respects_parser_config(tmp_path: Path) -> None:
     result = generate_memory(tmp_path)
 
     assert result.document_count == 1
+
+
+def test_repository_parser_skips_known_lockfiles(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    (tmp_path / "package-lock.json").write_text(
+        '{"name": "demo", "lockfileVersion": 2}',
+        encoding="utf-8",
+    )
+
+    parser = RepositoryParser(tmp_path)
+    documents = parser.parse()
+    assert all(doc.source != "package-lock.json" for doc in documents)
+    assert len(documents) == 1
 
 
 class TestFullPipelineIntegration:

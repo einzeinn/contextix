@@ -77,6 +77,7 @@ class RoadmapDetector:
         """Filter out poetic/philosophical sentences that aren't real milestones."""
         stripped = text.strip().lower()
         poetic_starts = [
+            "perhaps",
             "perhaps one day", "perhaps every", "if that future",
             "maybe someday", "one can dream", "in a perfect world",
             "looking forward", "we believe", "we hope",
@@ -193,6 +194,8 @@ class RoadmapDetector:
     def _progression_lines(self, documents: list[ParsedDocument]) -> list[str]:
         results: list[str] = []
         for doc in documents:
+            if doc.file_type != "markdown":
+                continue
             for line in doc.content.splitlines():
                 stripped = line.strip()
                 for pat in self.TIMELINE_PATTERNS:

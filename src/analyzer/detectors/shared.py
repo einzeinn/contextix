@@ -18,9 +18,34 @@ import mistune
 # ---------------------------------------------------------------------------
 
 def _parse_ast(content: str) -> list[dict]:
-    """Parse markdown content into a mistune AST."""
-    md = mistune.create_markdown(renderer="ast")
-    return md(content)
+    """Parse markdown content into a mistune AST.
+
+    Mistune can raise exceptions on malformed or edge-case markdown. When that
+    happens, fall back to a simple line-based parsing strategy so analysis can
+    continue instead of aborting the whole generation pipeline.
+    """
+    try:
+        md = mistune.create_markdown(renderer="ast")
+        return md(content)
+    except Exception:
+        return _fallback_parse_ast(content)
+
+
+def _fallback_parse_ast(content: str) -> list[dict]:
+    """Best-effort fallback parser for malformed markdown."""
+    nodes: list[dict] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            nodes.append({"type": "blank_line"})
+            continue
+        if stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
+            text = stripped[level:].strip()
+            nodes.append({"type": "heading", "attrs": {"level": level}, "children": [{"type": "text", "raw": text}]})
+            continue
+        nodes.append({"type": "paragraph", "children": [{"type": "text", "raw": stripped}]})
+    return nodes
 
 
 def _heading_text(node: dict) -> str:
