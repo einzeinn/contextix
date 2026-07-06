@@ -41,6 +41,22 @@ Different types follow different workflows.
 
 ---
 
+# Local Development Workflow
+
+Before creating a pull request, contributors should install the repository hooks and run the quality checks locally:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+The repository uses GitHub Actions to run `pytest` and `ruff` on `push` and `pull_request`, ensuring tests and linting pass before merging.
+
+---
+
 # Contribution Workflow
 
 ```

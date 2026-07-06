@@ -68,6 +68,20 @@ contextix init
 contextix generate
 ```
 
+## Developer Setup
+
+To keep local development aligned with repository standards, install and enable the supplied pre-commit hooks:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+This repository also includes a GitHub Actions CI workflow that runs on push and pull request. The workflow installs dependencies, runs tests with `pytest`, and checks source quality with `ruff`.
+
 ### Use with AI
 
 After generating `.context/`, attach `bootstrap.md` or `handoff.md` when starting a new AI conversation.
